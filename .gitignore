@@ -4,4 +4,4 @@
 zk-test/test/*/
 zk-test/test/*.zip
 zk-test/tmp/**
-zookeeper-3.4.13/**
+apache-zookeeper-3.8.0/**
