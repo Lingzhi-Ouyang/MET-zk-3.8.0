@@ -1,0 +1,7 @@
+.idea/
+*.iml
+
+zk-test/test/*/
+zk-test/test/*.zip
+zk-test/tmp/**
+zookeeper-3.4.13/**
