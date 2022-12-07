@@ -110,26 +110,6 @@ public aspect LearnerAspect {
         LOG.debug("---------readPacket: ({}). Subnode: {}", payload, quorumPeerSubnodeId);
         final int type =  packet.getType();
         lastReadType = type;
-//        // will not intercept NEWLEADER / UPTODATE
-//        if (type == Leader.DIFF || type == Leader.TRUNC || type == Leader.SNAP
-//                || type == Leader.PROPOSAL || type == Leader.COMMIT) {
-//            try {
-//                // before offerMessage: increase sendingSubnodeNum
-//                quorumPeerAspect.setSubnodeSending();
-//                final long zxid = packet.getZxid();
-//                final int followerReadPacketId =
-//                        quorumPeerAspect.getTestingService().offerLocalEvent(quorumPeerSubnodeId, SubnodeType.QUORUM_PEER, zxid, payload, type);
-//                LOG.debug("followerReadPacketId = {}", followerReadPacketId);
-//                // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
-//                quorumPeerAspect.postSend(quorumPeerSubnodeId, followerReadPacketId);
-//
-//                // Trick: set RECEIVING state here
-//                quorumPeerAspect.getTestingService().setReceivingState(quorumPeerSubnodeId);
-//
-//            } catch (RemoteException e) {
-//                e.printStackTrace();
-//            }
-//        }
     }
 
     /***
@@ -212,7 +192,6 @@ public aspect LearnerAspect {
                     // just drop the message
                     LOG.debug("partition occurs! just drop the message.");
                     throw new InterruptedException();
-//                    return;
                 }
 
                 proceed(packet, flush);
@@ -226,18 +205,6 @@ public aspect LearnerAspect {
             return;
         }
     }
-
-//    /***
-//     * intercept a learner's setCurrentEpoch() action when receiving leader's NEWLEADER
-//     * Related code: Learner.java
-//     */
-//    pointcut writePacketInSyncWithLeader(long epoch):
-//            withincode(* org.apache.zookeeper.server.quorum.Learner.syncWithLeader(..)) &&
-//                    call(void org.apache.zookeeper.server.quorum.QuorumPeer.setCurrentEpoch(long)) && args(epoch);
-
-
-
-
 
 
 }

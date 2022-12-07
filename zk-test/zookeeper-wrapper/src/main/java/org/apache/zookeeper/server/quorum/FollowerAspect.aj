@@ -37,53 +37,15 @@ public aspect FollowerAspect {
         final String payload = quorumPeerAspect.packetToString(packet);
         final int quorumPeerSubnodeId = quorumPeerAspect.getQuorumPeerSubnodeId();
 
-//        // Set RECEIVING state since there is nowhere else to set
-//        try {
-//            quorumPeerAspect.getTestingService().setReceivingState(quorumPeerSubnodeId);
-//        } catch (final RemoteException e) {
-//            LOG.debug("Encountered a remote exception", e);
-//            throw new RuntimeException(e);
-//        }
-
         LOG.debug("---------readPacket: ({}). Subnode: {}", payload, quorumPeerSubnodeId);
         final int type =  packet.getType();
         if (type == MessageType.PROPOSAL || type == MessageType.COMMIT) {
             zxidTypeMap.put(packet.getZxid(), type);
         }
 
-//        if (type == Leader.PROPOSAL || type == Leader.COMMIT) {
-//            try {
-//                // before offerMessage: increase sendingSubnodeNum
-//                quorumPeerAspect.setSubnodeSending();
-//                final long zxid = packet.getZxid();
-//                final int followerReadPacketId =
-//                        quorumPeerAspect.getTestingService().offerLocalEvent(quorumPeerSubnodeId, SubnodeType.QUORUM_PEER, zxid, payload, type);
-//                LOG.debug("followerReadPacketId = {}", followerReadPacketId);
-//                // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
-//                quorumPeerAspect.postSend(quorumPeerSubnodeId, followerReadPacketId);
-//
-//                // Trick: set RECEIVING state here
-//                quorumPeerAspect.getTestingService().setReceivingState(quorumPeerSubnodeId);
-//
-//            } catch (RemoteException e) {
-//                e.printStackTrace();
-//            }
-//        }
     }
 
-//    protected void processPacket(QuorumPacket qp) throws IOException {
-//        long lastReadZxid = 0L;
-//        switch (qp.getType()) {
-//            case Leader.PROPOSAL:
-//                TxnHeader hdr = new TxnHeader();
-//                Record txn = SerializeUtils.deserializeTxn(qp.getData(), hdr);
-//                lastReadZxid = qp.getZxid();
-//                break;
-//            case Leader.COMMIT:
-//                lastReadZxid = qp.getZxid();
-//                break;
-//        }
-//    }
+
 
 
     /***

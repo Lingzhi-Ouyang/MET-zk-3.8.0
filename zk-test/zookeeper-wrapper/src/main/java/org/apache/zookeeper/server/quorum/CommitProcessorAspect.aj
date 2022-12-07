@@ -68,20 +68,13 @@ public privileged aspect CommitProcessorAspect {
 //        final int type =  request.type;
 ////        switch (type) {
 ////            case TestingDef.OpCode.notification:
-////            case TestingDef.OpCode.create:
-////            case TestingDef.OpCode.delete:
 ////            case TestingDef.OpCode.getData:
 ////            case TestingDef.OpCode.exists:
 ////            case TestingDef.OpCode.check:
-////            case TestingDef.OpCode.multi:
-////            case TestingDef.OpCode.sync:
 ////            case TestingDef.OpCode.getACL:
-////            case TestingDef.OpCode.setACL:
 ////            case TestingDef.OpCode.getChildren:
 ////            case TestingDef.OpCode.getChildren2:
 ////            case TestingDef.OpCode.ping:
-////            case TestingDef.OpCode.createSession:
-////            case TestingDef.OpCode.closeSession:
 ////            case TestingDef.OpCode.setWatches:
 ////                LOG.debug("Won't intercept toProcess request: {} ", request);
 ////                return;
@@ -138,64 +131,4 @@ public privileged aspect CommitProcessorAspect {
             throw new RuntimeException(e);
         }
     }
-
-//    /***
-//     *  possible issue: other threads may reach this pointcut before the CommitProcessor starts
-//     *     // intercept getting the request from the queue committedRequests
-//     *     // This method is called by
-//     *     // For follower: QuorumPeer
-//     *     // For leader: LearnerHandler / SyncRequestProcessor
-//     */
-//    pointcut commit(LinkedList queue, Request request):
-//            withincode(void CommitProcessor.commit(Request))
-//                && call(* LinkedList.add(..))
-//                && target(queue) && args(request);
-//
-//    before(LinkedList queue, Request request): commit(queue, request) {
-//        final long threadId = Thread.currentThread().getId();
-//        final String threadName = Thread.currentThread().getName();
-//        LOG.debug("before advice of CommitProcessor.commit()-------QuorumPeer Thread: {}, {}------", threadId, threadName);
-////        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-//        LOG.debug("--------------Before adding commit request {}: My commitRequests has {} element. commitSubnode: {}",
-//                request.type, queue.size(), subnodeId);
-//        final int type =  request.type;
-//        switch (type) {
-//            case TestingDef.OpCode.notification:
-//            case TestingDef.OpCode.create:
-//            case TestingDef.OpCode.delete:
-//            case TestingDef.OpCode.createSession:
-//            case TestingDef.OpCode.exists:
-//            case TestingDef.OpCode.check:
-//            case TestingDef.OpCode.multi:
-//            case TestingDef.OpCode.sync:
-//            case TestingDef.OpCode.getACL:
-//            case TestingDef.OpCode.setACL:
-//            case TestingDef.OpCode.getChildren:
-//            case TestingDef.OpCode.getChildren2:
-//            case TestingDef.OpCode.ping:
-//            case TestingDef.OpCode.closeSession:
-//            case TestingDef.OpCode.setWatches:
-//                LOG.debug("Won't intercept commit request: {} ", request);
-//                return;
-//            default:
-//        }
-//        try {
-//            // before offerMessage: increase sendingSubnodeNum
-//            quorumPeerAspect.setSubnodeSending();
-//            final String payload = quorumPeerAspect.constructRequest(request);
-//            LOG.debug("-----before getting this pointcut in the synchronized method: " + request);
-////            int lastCommitRequestId = intercepter.getTestingService().commit(subnodeId, payload, type);
-//            final int lastCommitRequestId =
-//                    testingService.offerRequestProcessorMessage(subnodeId, SubnodeType.COMMIT_PROCESSOR, payload);
-//            LOG.debug("lastCommitRequestId = {}", lastCommitRequestId);
-//            // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
-//            quorumPeerAspect.postSend(subnodeId, lastCommitRequestId);
-//            // TODO: is there any better position to set receiving state?
-////            intercepter.getTestingService().setReceivingState(subnodeId);
-//            testingService.setReceivingState(subnodeId);
-//        } catch (final RemoteException e) {
-//            LOG.debug("Encountered a remote exception", e);
-//            throw new RuntimeException(e);
-//        }
-//    }
 }
