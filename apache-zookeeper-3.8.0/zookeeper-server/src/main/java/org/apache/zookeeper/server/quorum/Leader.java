@@ -996,7 +996,6 @@ public class Leader extends LearnerMaster {
      */
     @Override
     public synchronized void processAck(long sid, long zxid, SocketAddress followerAddr) {
-        LOG.debug("---------------------in method processAck");
         if (!allowedToCommit) {
             return; // last op committed was a leader change - from now on
         }

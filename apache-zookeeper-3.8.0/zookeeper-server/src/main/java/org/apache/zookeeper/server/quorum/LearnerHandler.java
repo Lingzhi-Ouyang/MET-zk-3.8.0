@@ -653,9 +653,7 @@ public class LearnerHandler extends ZooKeeperThread {
 
             while (true) {
                 qp = new QuorumPacket();
-                LOG.debug("---------------------in while before readRecord");
                 ia.readRecord(qp, "packet");
-                LOG.debug("---------------------in while after readRecord");
                 messageTracker.trackReceived(qp.getType());
 
                 if (LOG.isTraceEnabled()) {
@@ -680,9 +678,7 @@ public class LearnerHandler extends ZooKeeperThread {
                         LOG.debug("Received ACK from Observer {}", this.sid);
                     }
                     syncLimitCheck.updateAck(qp.getZxid());
-                    LOG.debug("---------------------after updateAck");
                     learnerMaster.processAck(this.sid, qp.getZxid(), sock.getLocalSocketAddress());
-                    LOG.debug("---------------------after processAck");
                     break;
                 case Leader.PING:
                     // Process the touches
