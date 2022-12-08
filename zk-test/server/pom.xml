@@ -19,7 +19,7 @@
     <parent>
         <groupId>org.disalg.met.zk</groupId>
         <artifactId>parent</artifactId>
-        <version>3.8.0-SNAPSHOT</version>
+        <version>${zookeeper.version}-SNAPSHOT</version>
     </parent>
 
     <artifactId>server</artifactId>
