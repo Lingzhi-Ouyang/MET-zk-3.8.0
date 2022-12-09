@@ -34,8 +34,9 @@ public class GetDataVerifier implements Verifier{
         assert len >= 2;
         final String latestOne = returnedDataList.get(len - 1);
         final String latestSecond = returnedDataList.get(len - 2);
-        boolean result = (latestOne.length() > latestSecond.length()) ||
-                (latestOne.length() == latestSecond.length() && latestOne.compareTo(latestSecond) >= 0);
+        boolean result = Long.parseLong(latestOne, 16) >= Long.parseLong(latestSecond, 16);
+//        boolean result = (latestOne.length() > latestSecond.length()) ||
+//                (latestOne.length() == latestSecond.length() && latestOne.compareTo(latestSecond) >= 0);
         if (this.modelResult == null) {
             matchModel = "UNKNOWN";
         } else if (this.modelResult.equals(latestOne)){
