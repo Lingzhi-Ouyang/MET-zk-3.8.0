@@ -69,48 +69,80 @@ public class FollowerToLeaderMessageExecutor extends BaseEventExecutor {
         if (NodeState.ONLINE.equals(nodeState)) {
             switch (lastReadType) {
                 case MessageType.LEADERINFO:   // releasing my ACKEPOCH
-                    // wait for leader update currentEpoch file
                     testingService.getNodePhases().set(leaderId, Phase.SYNC);
                     testingService.getNodePhases().set(followerId, Phase.SYNC);
+
                     LOG.info("follower replies ACKEPOCH : {}", event);
+                    // Post-condition: wait for leader update currentEpoch file
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitCurrentEpochUpdated(leaderId);
+
+                    // Post-condition:
+                    // for zk-3.5/6/7/8:
+                    // - DIFF / TRUNC: let follower mapping to the leader's corresponding learnerHandlerSender
+                    // - SNAP: the corresponding learnerHandlerSender will not be created here
                     testingService.getControlMonitor().notifyAll();
-                    testingService.waitFollowerMappingLearnerHandlerSender(followerId);
-                    // TODO: let leader's corresponding learnerHandlerSender sending DIFF / TRUNC
-                    // TODO: Or: let leader's corresponding learnerHandler sending SNAP
-                    testingService.getControlMonitor().notifyAll();
-                    testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
+                    testingService.waitSyncTypeDetermined(followerId);
+                    final int syncType = testingService.getSyncType(followerId);
+                    LOG.info("Leader {} is going to sync with follower {} using {}", leaderId, followerId, syncType);
+
+                    if ( syncType == MessageType.DIFF || syncType == MessageType.TRUNC ) {
+                        // Post-condition: let follower mapping to the leader's corresponding learnerHandlerSender
+                        testingService.getControlMonitor().notifyAll();
+                        testingService.waitFollowerMappingLearnerHandlerSender(followerId);
+                        // Post-condition for DIFF / TRUNC: let leader's corresponding learnerHandlerSender sending DIFF / TRUNC
+                        testingService.getControlMonitor().notifyAll();
+                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
+                    } else {
+                        // Post-condition for SNAP: let leader's corresponding learnerHandler sending SNAP
+                        testingService.getControlMonitor().notifyAll();
+                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
+                    }
                     break;
-                case MessageType.NEWLEADER:     // releasing my ACK
-                    // let leader's corresponding learnerHandler be intercepted at ReadRecord
-                    // this has been done in last step
+                case MessageType.NEWLEADER:     // releasing my ACK-LD.
+                    // ---------------DEPRECATED---------------
+                    // This is DEPRECATED since a new interceptor is added at setCurrentEpochInProcessingNEWLEADER
+                    // ---------------DEPRECATED---------------
+
+                    // Post-condition:
+                    // let leader's corresponding learnerHandler process this ACK,
+                    // then again be intercepted at ReadRecord
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
-                    // let leader's corresponding learnerHandlerSender be sending
+
+                    // Post-condition: LeaderSendUPTODATE by leader's corresponding learnerHandlerSender
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
                     break;
                 case MessageType.UPTODATE:      // releasing my ACK
+                    // Post-condition: wait for follower's syncProcessorExisted && commitProcessorExisted
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitFollowerSteadyAfterProcessingUPTODATE(followerId);
-                    // let leader's corresponding learnerHandler process this ACK, then again be intercepted at ReadRecord
+
+                    // Post-condition:
+                    // let leader's corresponding learnerHandler process this ACK,
+                    // then again be intercepted at ReadRecord
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
                     break;
                 case MessageType.PROPOSAL:      // releasing my ACK
                     if (followerPhase.equals(Phase.BROADCAST)) {
                         LOG.info("follower replies to previous PROPOSAL message type : {}", event);
-                        // let leader's corresponding learnerHandler process this ACK, then again be intercepted at ReadRecord
+
+                        // Post-condition:
+                        // let leader's corresponding learnerHandler process this ACK,
+                        // then again be intercepted at ReadRecord
                         testingService.getControlMonitor().notifyAll();
                         testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
-                        // let leader's corresponding learnerHandlerSender be sending
+
+                        // Post-condition: let leader's corresponding learnerHandlerSender be sending COMMIT
                         testingService.getControlMonitor().notifyAll();
                         testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
                     }
                     break;
-                case MessageType.COMMIT: // for now we do not intercept leader's COMMIT in sync
-                    LOG.info("follower replies to previous COMMIT message type : {}", event);
+                case MessageType.COMMIT:
+                    LOG.warn("SOMETHING WRONG! Actually, FollowerCommit is a local event, " +
+                            "and a follower SHOULD not reply a COMMIT message: {}", event);
                     break;
                 default:
                     LOG.info("follower replies to previous message type : {}", event);
