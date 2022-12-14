@@ -78,7 +78,8 @@ public class LocalEvent extends AbstractEvent{
                     action = "FollowerProcessSNAP";
                     break;
                 case MessageType.NEWLEADER:
-                    action = "FollowerProcessNEWLEADER";
+                    // As a local event, it means that follower has updated its current epoch in zk-3.8 till Dec. 2022
+                    action = "FollowerProcessNEWLEADERAfterCurrentEpochUpdated";
                     break;
                 case MessageType.UPTODATE:
                     action = "FollowerProcessUPTODATE";
