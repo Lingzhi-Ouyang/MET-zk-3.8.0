@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.List;
 
 public class LeaderToFollowerMessageExecutor extends BaseEventExecutor {
 
@@ -68,63 +69,109 @@ public class LeaderToFollowerMessageExecutor extends BaseEventExecutor {
         // and then wait for the target follower to be at the next intercepted point
         if (NodeState.ONLINE.equals(followerState)) {
             switch (type) {
-                case MessageType.LEADERINFO:
+                case MessageType.LEADERINFO:   // releasing my LEADERINFO
                     LOG.info("leader releases LEADERINFO and follower will reply ACKEPOCH: {}", event);
+                    // Post-condition: FollowerSendACKEPOCH by the follower's QUORUM_PEER
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
                     break;
-                case MessageType.DIFF:
-                case MessageType.TRUNC:
-                case MessageType.SNAP:
-                    LOG.info("leader sends DIFF / TRUNC / SNAP that follower will not reply : {}", event);
+                case MessageType.DIFF:    // releasing my DIFF
+                case MessageType.TRUNC: // releasing my TRUNC
+                case MessageType.SNAP: // releasing my SNAP
+                    LOG.info("Leader sends DIFF / TRUNC / SNAP that follower will not reply : {}", event);
+
+                    if (type == MessageType.TRUNC) {
+                        long lastZxid = event.getZxid();
+                        List<Long> zxidRecord = testingService.getAllZxidRecords().get(followerId);
+                        final int idx = zxidRecord.indexOf(lastZxid);
+                        if (idx >= 0) {
+                            // truncate to lastZxid
+//                            int len = zxidRecord.size();
+//                            for (int i = len - 1; i > idx; i--) {
+//                                zxidRecord.remove(i);
+//                            }
+                            testingService.getAllZxidRecords().set(followerId, zxidRecord.subList(0,idx + 1));
+                            LOG.info("After receiving leader {}'s TRUNC message, " +
+                                    "follower {}'s history might change: {}", leaderId, followerId, testingService.getAllZxidRecords());
+                        }
+                    } else if (type == MessageType.SNAP) {
+                        long lastZxid = event.getZxid();
+                        List<Long> zxidRecord = testingService.getAllZxidRecords().get(leaderId);
+                        final int idx = zxidRecord.indexOf(lastZxid);
+                        // Using leader's history as the standard
+                        testingService.getAllZxidRecords().set(followerId, zxidRecord.subList(0,idx + 1));
+                        LOG.info("After receiving leader {}'s SNAP message, " +
+                                "follower {}'s history might change: {}", leaderId, followerId, testingService.getAllZxidRecords());
+                    }
+
+                        // Post-condition: Leader will send NEWLEADER at last anyway by the leader's LearnerHandlerSender
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeInSendingState(sendingSubnodeId);
+
+                    // Post-condition: this is for zk-3.4 where LearnerHandlerSender might be created here
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitFollowerMappingLearnerHandlerSender(followerId);
+
+                    // Post-condition: LearnerHandlerReadRecord by the leader's LearnerHandler
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
                     break;
-                case MessageType.NEWLEADER:
+                case MessageType.NEWLEADER: // releasing my NEWLEADER
                     // wait for follower's ack to be sent.
                     // Before this done, follower's currentEpoch file is updated
-                    LOG.info("leader releases NEWLEADER and follower will reply ACK: {}", event);
+
+                    // --------------UPDATE 22/12-------------
+                    // Updated 22/12: add an interceptor point after updating currentEpoch file
+                    // Post-condition: SubmitLoggingTaskInProcessingNEWLEADER by the follower's QUORUM_PEER
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
 
-                    // let leader's corresponding learnerHandler be intercepted at ReadRecord
-                    // Note: sendingSubnodeId is the learnerHandlerSender, not learnerHandler
-                    testingService.getControlMonitor().notifyAll();
-                    testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
+                    // LOG.info("IF NOT intercepting update currentEpoch: " +
+                    //       "leader releases NEWLEADER and follower will reply ACK: {}", event);
+
+//                    // let leader's corresponding learnerHandler be intercepted at ReadRecord
+//                    // Note: sendingSubnodeId is the learnerHandlerSender, not learnerHandler
+//                    testingService.getControlMonitor().notifyAll();
+//                    testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
 
                     break;
-                case MessageType.UPTODATE:
-                    // We do not intercept ACK to UPTODATE
+                case MessageType.UPTODATE: // releasing my UPTODATE
                     LOG.info("leader releases UPTODATE and follower will reply ACK: {}", event);
+                    // Post-condition: FollowerSendACKtoUPTODATE by the follower's QUORUM_PEER
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
 
                     // let leader's corresponding learnerHandler be intercepted at ReadRecord
-                    // Note: sendingSubnodeId is the learnerHandlerSender, not learnerHandler
+                    // Post-condition: LearnerHandlerReadRecord by the leader's LearnerHandler
+                    // ATTENTION! sendingSubnodeId is the learnerHandlerSender, not learnerHandler
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
 
                     // let leader's QUORUM_PEER be intercepted at LeaderJudgeIsRunning
+                    // Post-condition: LeaderJudgeIsRunning by the leader's QUORUM_PEER
                     testingService.getControlMonitor().notifyAll();
                     testingService.waitSubnodeTypeSending(leaderId, SubnodeType.QUORUM_PEER);
                     break;
-                case MessageType.PROPOSAL: // for leader's PROPOSAL in sync, follower will not produce any intercepted event
+                case MessageType.PROPOSAL:  // releasing my PROPOSAL
+                    // for leader's PROPOSAL in sync, follower will not produce any intercepted event
+                    // follower just add the proposal into the packetsNotCommitted queue
+                    // in zk-3.5/6/7/8: follower will call logRequest(..) when processing NEWLEADER
                     if (Phase.BROADCAST.equals(testingService.getNodePhases().get(followerId))) {
+                        // Post-condition: FollowerLogPROPOSAL by the follower's SYNC_PROCESSOR
                         testingService.getControlMonitor().notifyAll();
                         testingService.waitSubnodeTypeSending(followerId, SubnodeType.SYNC_PROCESSOR);
                     }
                     break;
-                case MessageType.COMMIT: // for leader's COMMIT in sync, follower will not produce any intercepted event
+                case MessageType.COMMIT:  // releasing my COMMIT
+                    // for leader's COMMIT in sync, follower will not produce any intercepted event
+                    // follower just add the proposal into the packetsNotCommitted queue
                     if (Phase.BROADCAST.equals(testingService.getNodePhases().get(followerId))) {
+                        // Post-condition: FollowerCommit by the follower's SYNC_PROCESSOR
                         testingService.getControlMonitor().notifyAll();
                         testingService.waitSubnodeTypeSending(followerId, SubnodeType.COMMIT_PROCESSOR);
                     }
                     break;
-                case TestingDef.MessageType.learnerHandlerReadRecord:
+                case TestingDef.MessageType.learnerHandlerReadRecord: // releasing my learnerHandlerReadRecord
 //                    if (Phase.SYNC.equals(testingService.getNodePhases().get(followerId))) {
 //                        // must be going to send UPTODATE
 //                        testingService.getControlMonitor().notifyAll();
