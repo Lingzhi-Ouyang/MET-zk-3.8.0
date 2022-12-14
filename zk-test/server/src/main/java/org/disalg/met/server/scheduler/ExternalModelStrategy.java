@@ -255,6 +255,7 @@ public class ExternalModelStrategy implements SchedulingStrategy{
             case FollowerLog:
             case LeaderCommit:
             case FollowerCommit:
+            case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
                 searchLocalMessage(action, nodeId, modelZxid, enabled);
                 break;
         }
@@ -404,7 +405,6 @@ public class ExternalModelStrategy implements SchedulingStrategy{
 //                        break;
                     case LeaderLog:
                         final long eventZxid = event.getZxid();
-                        final int eventType = event.getType();
                         if (!subnodeType.equals(SubnodeType.SYNC_PROCESSOR)) continue;
                         // since leaderLog always come first, here record the zxid mapping from model to code
                         if (modelZxid > 0) {
@@ -414,6 +414,11 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                                     Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                     Long.toHexString(event.getZxid()));
                         }
+                        break;
+                    case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
+                        LOG.debug("FollowerProcessNEWLEADERAfterCurrentEpochUpdated: {}, {}", subnodeType, type);
+                        if (!subnodeType.equals(SubnodeType.QUORUM_PEER)
+                                || type != TestingDef.MessageType.NEWLEADER) continue;
                         break;
                     case FollowerLog:
                         if (!subnodeType.equals(SubnodeType.SYNC_PROCESSOR)) continue;
