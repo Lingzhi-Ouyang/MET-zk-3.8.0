@@ -784,6 +784,15 @@ public privileged aspect QuorumPeerAspect {
         try {
             LOG.debug("-------nodeId: {}, after writeLongToFile: set {} = 0x{}", myId, name, Long.toHexString(epoch));
             testingService.writeLongToFile(myId, name, epoch);
+//            if (name.equals("currentEpoch")) {
+//                // before offerMessage: increase sendingSubnodeNum
+//                setSubnodeSending();
+//                final int lastRequestId = testingService.offerLocalEvent(quorumPeerSubnodeId, SubnodeType.QUORUM_PEER,
+//                        epoch, "setCurrentEpoch", TestingDef.MessageType.NEWLEADER);
+//                LOG.debug("lastRequestId = {}", lastRequestId);
+//                // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
+//                postSend(quorumPeerSubnodeId, lastRequestId);
+//            }
         } catch (final Exception e) {
             LOG.error("Encountered a remote exception", e);
             throw new RuntimeException(e);
