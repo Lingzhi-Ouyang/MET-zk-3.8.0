@@ -25,7 +25,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -242,6 +241,10 @@ public class TestingService implements TestingRemoteService {
 
     public List<Integer> getSyncTypeList() {
         return syncTypeList;
+    }
+
+    public int getSyncType(final int idx) {
+        return syncTypeList.get(idx);
     }
 
     public List<NodeStateForClientRequest> getNodeStateForClientRequests() {
@@ -616,6 +619,11 @@ public class TestingService implements TestingRemoteService {
                             int retry = 10;
                             totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
                                     modelAction, nodeId, peerId7, modelZxid7, totalExecuted, retry);
+                            break;
+                        case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
+                            LOG.debug("After FollowerUpdatedCurrentEpoch: {}", nodeId);
+                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
+                                    modelAction, nodeId, -1, -1, totalExecuted, 5);
                             break;
                         case SetInitState:
                             JSONArray participants2 = elements.getJSONArray("peerId");
@@ -3347,6 +3355,7 @@ public class TestingService implements TestingRemoteService {
                 case MessageType.TRUNC:
                     nodePhases.set(sendingNodeId, Phase.SYNC);
                     nodePhases.set(receivingNodeId, Phase.SYNC);
+                    syncTypeList.set(receivingNodeId, type);
                     followerLearnerHandlerSenderMap.set(receivingNodeId, sendingSubnodeId);
                     break;
                 case MessageType.SNAP:
@@ -3355,6 +3364,7 @@ public class TestingService implements TestingRemoteService {
 //                    leaderSyncFollowerCountMap.put(sendingNodeId, leaderSyncFollowerCountMap.get(sendingNodeId) - 1);
                     nodePhases.set(sendingNodeId, Phase.SYNC);
                     nodePhases.set(receivingNodeId, Phase.SYNC);
+                    syncTypeList.set(receivingNodeId, type);
                     break;
                 case MessageType.NEWLEADER:
                     LOG.debug("-------leader {} is about to send NEWLEADER to follower {} !!!!",
@@ -4160,22 +4170,8 @@ public class TestingService implements TestingRemoteService {
             try {
                 // Update allZxidRecords
                 List<Long> zxidRecord = allZxidRecords.get(nodeId);
+                LOG.debug("Node " + nodeId + "'s original record: {}", zxidRecord);
                 int len = zxidRecord.size();
-                LOG.debug("Node " + nodeId + " record: {}", zxidRecord);
-                // TODO: buggy
-//                if (syncTypeList.get(nodeId).equals(MessageType.SNAP) || syncTypeList.get(nodeId).equals(MessageType.TRUNC)) {
-//                    LOG.debug("{}, {}", lastProcessedZxid, lastCommittedZxid);
-////                    allZxidRecords.clear();
-////                    for (Long zxid: lastCommittedZxid) {
-////                        zxidRecord.add(zxid);
-////                    }
-//                    int idx = lastCommittedZxid.indexOf(lastProcessedZxid);
-//                    allZxidRecords.set(nodeId, new ArrayList<>(lastCommittedZxid.subList(0, idx+1)));
-//                    LOG.debug("syncTypeList({}): SNAP / TRUNC, {}, {}", nodeId, zxidRecord, allZxidRecords.get(nodeId));
-//                    syncTypeList.set(nodeId, -1);
-//                    executionWriter.write(
-//                            "\n---just update Node " + nodeId + "'s last record: " + allZxidRecords.get(nodeId));
-//                } else
                 if (zxidRecord.get(len - 1) < lastProcessedZxid
                         && (lastProcessedZxid & 0xffffffffL) != 0L  ){
                     zxidRecord.add(lastProcessedZxid);
@@ -4227,6 +4223,13 @@ public class TestingService implements TestingRemoteService {
             } catch (final IOException e) {
                 LOG.debug("IO exception", e);
             }
+        }
+        if (name.equals("currentEpoch") &&
+                leaderElectionStates.get(nodeId).equals(LeaderElectionState.FOLLOWING) &&
+                nodePhases.get(nodeId).equals(Phase.SYNC)) {
+            offerLocalEvent(getSubnodeId(nodeId, SubnodeType.QUORUM_PEER),
+                    SubnodeType.QUORUM_PEER,
+                    epoch, null, TestingDef.MessageType.NEWLEADER);
         }
     }
 
@@ -4512,7 +4515,8 @@ public class TestingService implements TestingRemoteService {
     }
 
     /***
-     * Post-condition for scheduling LeaderSyncFollower
+     * Attention!!!
+     * Post-condition for scheduling LeaderSyncFollower only
      * Not forced
      * @param nodeId
      */
@@ -4567,6 +4571,11 @@ public class TestingService implements TestingRemoteService {
         wait(aliveNodesInLookingState, timeout);
     }
 
+    public void waitSyncTypeDetermined(final int nodeId) {
+        final WaitPredicate syncTypeDetermined = new SyncTypeDetermined(this, nodeId);
+        wait(syncTypeDetermined, 0L);
+    }
+
     public void waitFollowerMappingLearnerHandlerSender(final int nodeId) {
         final WaitPredicate followerMappingLearnerHandlerSender = new FollowerMappingLearnerHandlerSender(this, nodeId);
         wait(followerMappingLearnerHandlerSender, 0L);
@@ -4581,18 +4590,7 @@ public class TestingService implements TestingRemoteService {
     }
 
     public void waitSubnodeTypeSending(int nodeId, SubnodeType subnodeType) {
-        int subnodeId = -1;
-        Set<Subnode> subnodes = subnodeSets.get(nodeId);
-        for (final Subnode subnode : subnodes) {
-            if (subnode.getSubnodeType().equals(subnodeType)) {
-                LOG.debug("------node {}'s subnode: {}, {}, {}",
-                        nodeId, subnode.getId(), subnode.getSubnodeType(), subnode.getState());
-//                // set the receiving QUORUM_PEER subnode to be PROCESSING
-//                subnode.setState(SubnodeState.PROCESSING);
-                subnodeId = subnode.getId();
-                break;
-            }
-        }
+        int subnodeId = getSubnodeId(nodeId, subnodeType);
         if (subnodeId >= 0) {
             waitSubnodeInSendingState(subnodeId);
         }
@@ -4620,5 +4618,19 @@ public class TestingService implements TestingRemoteService {
 
     public int nodIdOfSubNode(int subNodeID){
         return subnodeMap.get(subNodeID);
+    }
+
+    private int getSubnodeId(int nodeId, SubnodeType subnodeType) {
+        Set<Subnode> subnodes = subnodeSets.get(nodeId);
+        for (final Subnode subnode : subnodes) {
+            if (subnode.getSubnodeType().equals(subnodeType)) {
+                LOG.debug("------node {}'s subnode: {}, {}, {}",
+                        nodeId, subnode.getId(), subnode.getSubnodeType(), subnode.getState());
+//                // set the receiving QUORUM_PEER subnode to be PROCESSING
+//                subnode.setState(SubnodeState.PROCESSING);
+                return subnode.getId();
+            }
+        }
+        return -1;
     }
 }
