@@ -21,7 +21,7 @@ public enum ModelAction {
     FollowerProcessSyncMessage,
     FollowerProcessPROPOSALInSync,
     FollowerProcessCOMMITInSync,
-    FollowerProcessNEWLEADER, LearnerHandlerReadRecord,
+    FollowerProcessNEWLEADER, LearnerHandlerReadRecord, FollowerProcessNEWLEADERAfterCurrentEpochUpdated,
     LeaderProcessACKLD,
     FollowerProcessUPTODATE,
 
