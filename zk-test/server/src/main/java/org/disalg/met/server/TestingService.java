@@ -531,10 +531,15 @@ public class TestingService implements TestingRemoteService {
                                     .map(p -> serverIdMap.get(p.toString())).collect(Collectors.toList());
                             // get leader's accepted epoch
 //                            long modelAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
-                            LOG.debug("election leader: {}, other participants: {}",
-                                    nodeId, peers);
+                            List<Integer> looking = null;
+                            if (elements.getJSONArray("looking") != null) {
+                                looking = elements.getJSONArray("looking").stream()
+                                        .map(p -> serverIdMap.get(p.toString())).collect(Collectors.toList());
+                            }
+                            LOG.debug("election leader: {}, other participants: {}, looking: {}",
+                                    nodeId, peers, looking);
                             totalExecuted = scheduleElectionAndDiscovery(externalModelStrategy,
-                                    currentStep, nodeId, peers, -1L, totalExecuted);
+                                    currentStep, nodeId, peers, looking, -1L, totalExecuted);
                             break;
 
                         // focus on history
@@ -1262,7 +1267,7 @@ public class TestingService implements TestingRemoteService {
 //        long modelAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
         LOG.debug("election leader: {}, other participants: {}",
                 leaderId, peers);
-        scheduleElectionAndDiscovery(strategy, currentStep, leaderId, peers, -1L, totalExecuted);
+        scheduleElectionAndDiscovery(strategy, currentStep, leaderId, peers, null, -1L, totalExecuted);
 
         long modelZxid = -1L;
         int retry1 = 3;
@@ -1397,20 +1402,27 @@ public class TestingService implements TestingRemoteService {
                                             final Integer currentStep,
                                             final Integer leaderId,
                                             List<Integer> peers,
+                                            List<Integer> looking,
                                             final Long modelAcceptedEpoch,
                                             int totalExecuted) throws SchedulerConfigurationException {
         try{
             Set<Integer> allParticipants = new HashSet<>(peers);
             allParticipants.add(leaderId);
+            Set<Integer> lookingParticipants;
 
             /* Election */
             LOG.debug("start Election! try to elect leader: {}, followers: {}", leaderId, peers);
             synchronized (controlMonitor) {
-                Set<Integer> lookingParticipants = new HashSet<>(peers);
-                if (participants.size() <= (schedulerConfiguration.getNumNodes() / 2)) {
-                    lookingParticipants.add(leaderId);
+                // pre-condition: determine which node is looking for leader
+                if (looking == null) {
+                    lookingParticipants = new HashSet<>(peers);
+                    if (participants.size() <= (schedulerConfiguration.getNumNodes() / 2)) {
+                        lookingParticipants.add(leaderId);
+                    }
+                } else {
+                    lookingParticipants = new HashSet<>(looking);
                 }
-                // pre-condition
+                LOG.debug("Nodes looking for leader: {}", lookingParticipants);
                 waitAliveNodesInLookingState(lookingParticipants);
 
                 // if model leader still in LOOKING state
@@ -1475,9 +1487,14 @@ public class TestingService implements TestingRemoteService {
                             } else {
                                 // all nodes should be communicated through leader
                                 if (sendingNodeId != receivingNode) {
-                                    LOG.debug("dropping notifications irrelative to leader {} ,sendingNodeId {}, receivingNode {}.",
-                                            leaderId, sendingNodeId, receivingNode);
-                                    e.setFlag(TestingDef.RetCode.NODE_PAIR_IN_PARTITION);
+                                    if (lookingParticipants.contains(sendingNodeId) && lookingParticipants.contains(receivingNode) ) {
+                                        LOG.debug("dropping notifications irrelative to leader {} ,sendingNodeId {}, receivingNode {}.",
+                                                leaderId, sendingNodeId, receivingNode);
+                                        e.setFlag(TestingDef.RetCode.NODE_PAIR_IN_PARTITION);
+                                    } else {
+                                        LOG.debug("receivingNode {} NOT in LOOKING state, " +
+                                                "should let it communicate vote result", receivingNode);
+                                    }
                                 }
 //                            if (electionEpoch >= maxElectionEpochInLeader && proposedLeader != leaderId && sendingNodeId != receivingNode) {
 //                                LOG.debug("electionEpoch {} >= maxElectionEpoch {}, proposedLeader {} != leaderId {}, just drop it.",
@@ -1519,7 +1536,10 @@ public class TestingService implements TestingRemoteService {
             LOG.debug("Election finished and start DISCOVERY! leader: {}, followers: {}", leaderId, peers);
             // leader releases LEADERINFO
             for (int peer: peers) {
-                scheduleInternalEvent(strategy, ModelAction.FollowerProcessLEADERINFO, peer, leaderId, -1L, totalExecuted - 1);
+                if (lookingParticipants.contains(peer)) {
+                    LOG.debug("About to schedule LeaderSendLEADERINFO to a new follower! leader: {}, follower: {}", leaderId, peer);
+                    scheduleInternalEvent(strategy, ModelAction.FollowerProcessLEADERINFO, peer, leaderId, -1L, totalExecuted - 1);
+                }
             }
 
             statistics.endTimer();
@@ -3438,15 +3458,15 @@ public class TestingService implements TestingRemoteService {
                     LOG.debug("-------leader {} is about to send UPTODATE to follower {}!", sendingNodeId, receivingNodeId);
                     break;
                 case TestingDef.MessageType.learnerHandlerReadRecord:
-                    if ( nodePhases.get(sendingNodeId).equals(Phase.SYNC)
-                            || nodePhases.get(sendingNodeId).equals(Phase.BROADCAST)) {
+                    if ( nodePhases.get(receivingNodeId).equals(Phase.SYNC)
+                            || nodePhases.get(receivingNodeId).equals(Phase.BROADCAST)) {
                         LOG.debug("-------leader {}'s learner handler {} is about to read record from follower {}!",
                                 sendingNodeId, sendingSubnodeId, receivingNodeId);
                         LOG.debug("before readRecordIntercepted: {}", readRecordIntercepted);
                         readRecordIntercepted.put(receivingNodeId, true);
                         LOG.debug("update readRecordIntercepted: {}", readRecordIntercepted);
                     } else {
-                        LOG.debug("-------leader is still in discovery, will not intercept read record!");
+                        LOG.debug("-------follower {} is still in discovery, will not intercept read record!", receivingNodeId);
                         return TestingDef.RetCode.NOT_INTERCEPTED;
                     }
                     break;
