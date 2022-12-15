@@ -446,6 +446,12 @@ public privileged aspect QuorumPeerAspect {
     after(final LinkedBlockingQueue queue) returning (final FastLeaderElection.Notification notification): pollRecvQueue(queue) {
         this.notification = notification;
         LOG.debug("Received a notification with id = {}", notification.getMessageId());
+        try {
+            testingService.setReceivingState(quorumPeerSubnodeId);
+        } catch (final RemoteException e) {
+            LOG.debug("Encountered a remote exception", e);
+            throw new RuntimeException(e);
+        }
     }
 
     // Intercept state update (within QuorumPeer)
