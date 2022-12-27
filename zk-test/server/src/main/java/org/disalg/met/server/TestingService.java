@@ -4376,7 +4376,7 @@ public class TestingService implements TestingRemoteService {
                                                long modelZxid) {
         final TargetInternalEventReady targetInternalEventReady =
                 new TargetInternalEventReady(this, strategy, action, nodeId, peerId, modelZxid);
-        wait(targetInternalEventReady, 2000L);
+        wait(targetInternalEventReady, 1000L);
         Event e = targetInternalEventReady.getEvent();
         return e;
     }
