@@ -115,8 +115,8 @@ public aspect LearnerAspect {
     /***
      * For follower's sync with leader process with sending REPLY (partition will work on the process)
      * Since follower will always reply ACK type, so it is more useful to match its last package type
-     *  lastReadType==NEWLEADER --> FollowerProcessUPTODATE : send ACK to UPTODATE, offerFollowerToLeaderMessage
-     *  lastReadType==UPTODATE --> FollowerProcessNEWLEADER : send ACK to NEWLEADER,  offerFollowerToLeaderMessage
+     *  lastReadType==UPTODATE --> FollowerProcessUPTODATE : send ACK to UPTODATE, offerFollowerToLeaderMessage
+     *  lastReadType==NEWLEADER --> FollowerProcessNEWLEADER : send ACK to NEWLEADER,  offerFollowerToLeaderMessage
      * Related code: Learner.java
      */
     pointcut writePacketInSyncWithLeader(QuorumPacket packet, boolean flush):
