@@ -77,7 +77,13 @@ public aspect FollowerAspect {
         if (type == MessageType.PING) {
             previousType = MessageType.PING;
         } else {
-            previousType = zxidTypeMap.get(zxid);
+            try {
+                previousType = zxidTypeMap.get(zxid);
+            } catch (NullPointerException npe) {
+                LOG.warn("---------previousType is null, previous packet might be in SYNC: {}. Subnode: {}", payload, syncSubnodeId);
+                previousType = MessageType.PROPOSAL_IN_SYNC;
+            }
+
         }
         LOG.debug("Follower is about to reply a message type={} to leader's previous message (type={})", type, previousType);
 //        if (type == null) {
