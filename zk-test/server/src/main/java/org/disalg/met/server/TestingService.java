@@ -626,6 +626,7 @@ public class TestingService implements TestingRemoteService {
                                     modelAction, nodeId, peerId7, modelZxid7, totalExecuted, retry);
                             break;
                         case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
+
                             LOG.debug("After FollowerUpdatedCurrentEpoch: {}", nodeId);
                             totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
                                     modelAction, nodeId, -1, -1, totalExecuted, 5);
