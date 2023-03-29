@@ -562,6 +562,7 @@ public class TestingService implements TestingRemoteService {
                         // focus on last committed
                         case LeaderProcessACK: // release ACK && release learner handler's readRecord && release COMMIT
                             int peerId3 = serverIdMap.get(elements.getString("peerId"));
+                            // TODO: should acquire peerId's last history item
                             long leaderLastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
                             LOG.debug("LeaderProcessACK modelZxid: {}", Long.toHexString(leaderLastCommitted));
                             totalExecuted = scheduleLeaderProcessACK(externalModelStrategy,
@@ -1287,6 +1288,10 @@ public class TestingService implements TestingRemoteService {
         for (Integer peer: peers) {
             scheduleInternalEventWithWaitingRetry(strategy,
                     ModelAction.FollowerProcessNEWLEADER, peer, leaderId, modelZxid, totalExecuted, retry1);
+        }
+        for (Integer peer: peers) {
+            scheduleInternalEventWithWaitingRetry(strategy,
+                    ModelAction.FollowerProcessNEWLEADERAfterCurrentEpochUpdated, peer, -1, -1, totalExecuted, retry1);
         }
         for (Integer peer: peers) {
             scheduleFollowerACKandLeaderReadRecord(strategy,
@@ -2016,7 +2021,7 @@ public class TestingService implements TestingRemoteService {
         try {
             LOG.debug("try to schedule LeaderToFollowerProposal leaderId: {}", leaderId);
             scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderToFollowerProposal,
-                    followerId, leaderId, modelZxid, totalExecuted, 3);
+                    followerId, leaderId, modelZxid, totalExecuted, 2);
         } catch (SchedulerConfigurationException e2) {
             LOG.debug("SchedulerConfigurationException found when scheduling LeaderToFollowerProposal! " +
                     "Try to schedule follower's LogPROPOSAL. (This should usually occur in / just after SYNC)");
@@ -4227,7 +4232,7 @@ public class TestingService implements TestingRemoteService {
     }
 
     @Override
-    public void writeLongToFile(final int nodeId, final String name, final long epoch) throws RemoteException {
+    public int writeLongToFile(final int nodeId, final String name, final long epoch) throws RemoteException {
         synchronized (controlMonitor) {
             try {
                 // Update currentEpoch / acceptedEpoch
@@ -4248,10 +4253,11 @@ public class TestingService implements TestingRemoteService {
         if (name.equals("currentEpoch") &&
                 leaderElectionStates.get(nodeId).equals(LeaderElectionState.FOLLOWING) &&
                 nodePhases.get(nodeId).equals(Phase.SYNC)) {
-            offerLocalEvent(getSubnodeId(nodeId, SubnodeType.QUORUM_PEER),
+            return offerLocalEvent(getSubnodeId(nodeId, SubnodeType.QUORUM_PEER),
                     SubnodeType.QUORUM_PEER,
                     epoch, null, TestingDef.MessageType.NEWLEADER);
         }
+        return TestingDef.RetCode.NOT_INTERCEPTED;
     }
 
     public void recordProperties(final int step, final long startTime, final Event event) throws IOException {
