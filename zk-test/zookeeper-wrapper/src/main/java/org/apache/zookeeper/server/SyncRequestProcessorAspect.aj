@@ -72,15 +72,15 @@ public aspect SyncRequestProcessorAspect {
         // TODO: Aspect of aspect
         final long threadId = Thread.currentThread().getId();
         final String threadName = Thread.currentThread().getName();
-        LOG.debug("before advice of sync-------Thread: {}, {}------", threadId, threadName);
+//        LOG.debug("before advice of sync-------Thread: {}, {}------", threadId, threadName);
 
-//        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-        LOG.debug("--------------My queuedRequests has {} element. syncProcessorSubnodeId: {}.",
-                queue.size(), subnodeId);
+////        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
+//        LOG.debug("--------------My queuedRequests has {} element. syncProcessorSubnodeId: {}.",
+//                queue.size(), subnodeId);
         if (queue.isEmpty()) {
             // Going to block here. Better notify the scheduler
-            LOG.debug("--------------Checked! My toSync queuedRequests has {} element. Go to RECEIVING state." +
-                    " Will be blocked until some request enqueues when nothing to flush", queue.size());
+//            LOG.debug("--------------Checked! My toSync queuedRequests has {} element. Go to RECEIVING state." +
+//                    " Will be blocked until some request enqueues when nothing to flush", queue.size());
             try {
 //                intercepter.getTestingService().setReceivingState(subnodeId);
                 testingService.setReceivingState(subnodeId);
@@ -99,15 +99,15 @@ public aspect SyncRequestProcessorAspect {
 
 //        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
 
-        LOG.debug("--------------My queuedRequests has {} element. syncProcessorSubnodeId: {}.",
-                queue.size(), subnodeId);
+//        LOG.debug("--------------My queuedRequests has {} element. syncProcessorSubnodeId: {}.",
+//                queue.size(), subnodeId);
         if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
             LOG.debug("SYNC threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
             return;
         }
 
         if (request == null){
-            LOG.debug("------It's not a request! Using poll() and flush now");
+            LOG.debug("------Using poll() just now and found no request! Flush now and using take()...");
             return;
         }
         if (request instanceof Request) {

@@ -1,5 +1,6 @@
 package org.apache.zookeeper.server.quorum;
 
+import org.disalg.met.api.MessageType;
 import org.disalg.met.api.SubnodeType;
 import org.disalg.met.api.TestingDef;
 import org.slf4j.Logger;
@@ -130,7 +131,7 @@ public aspect LearnerAspect {
 
         final String payload = quorumPeerAspect.packetToString(packet);
         final int quorumPeerSubnodeId = quorumPeerAspect.getQuorumPeerSubnodeId();
-        LOG.debug("---------writePacket: ({}). Subnode: {}", payload, quorumPeerSubnodeId);
+        LOG.debug("---------writePacket: ({}). Subnode: {}, lastReadType: {}", payload, quorumPeerSubnodeId, lastReadType);
         final int type =  packet.getType();
         if (type != Leader.ACK) {
             LOG.debug("Follower is about to reply a message to leader which is not an ACK. (type={})", type);
@@ -142,7 +143,12 @@ public aspect LearnerAspect {
         if (lastReadType == Leader.UPTODATE) {
             // FollowerProcessUPTODATE
             try {
-                LOG.debug("-------receiving UPTODATE!!!!-------begin to serve clients");
+                if (quorumPeerAspect.isSyncFinished()) {
+                    lastReadType = MessageType.PROPOSAL_IN_SYNC;
+                    LOG.debug("-------!!!!-------reply ACK to PROPOSAL in SYNC");
+                } else {
+                    LOG.debug("-------receiving UPTODATE!!!!-------begin to serve clients");
+                }
 
                 quorumPeerAspect.setSubnodeSending();
                 final long zxid = packet.getZxid();
@@ -175,8 +181,13 @@ public aspect LearnerAspect {
             // processing Leader.NEWLEADER
             try {
                 quorumPeerAspect.setSyncFinished(false);
+                if (quorumPeerAspect.isNewLeaderDone()) {
+                    lastReadType = MessageType.PROPOSAL_IN_SYNC;
+                    LOG.debug("-------!!!!-------reply ACK to PROPOSAL in SYNC");
+                } else {
+                    LOG.debug("-------receiving NEWLEADER!!!!-------reply ACK");
+                }
                 quorumPeerAspect.setNewLeaderDone(true);
-                LOG.debug("-------receiving NEWLEADER!!!!-------reply ACK");
                 quorumPeerAspect.setSubnodeSending();
                 final long zxid = packet.getZxid();
                 final int followerWritePacketId = quorumPeerAspect.getTestingService().offerFollowerToLeaderMessage(quorumPeerSubnodeId, zxid, payload, lastReadType);
@@ -201,6 +212,7 @@ public aspect LearnerAspect {
                 throw new RuntimeException(e);
             }
         } else {
+            LOG.debug("lastReadType = {}", lastReadType);
             proceed(packet, flush);
             return;
         }
