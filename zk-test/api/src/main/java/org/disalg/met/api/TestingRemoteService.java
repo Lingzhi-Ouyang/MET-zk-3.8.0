@@ -128,7 +128,7 @@ public interface TestingRemoteService extends Remote {
 
     void updateLastProcessedZxid(int nodeId, long lastProcessedZxid) throws RemoteException;
 
-    void writeLongToFile(int nodeId, String name, long e) throws RemoteException;
+    int writeLongToFile(int nodeId, String name, long e) throws RemoteException;
 
     void registerFollowerSocketInfo(int node, String socketAddress) throws RemoteException;
 
