@@ -1,9 +1,6 @@
 package org.disalg.met.server.executor;
 
-import org.disalg.met.api.MessageType;
-import org.disalg.met.api.SubnodeState;
-import org.disalg.met.api.SubnodeType;
-import org.disalg.met.api.TestingDef;
+import org.disalg.met.api.*;
 import org.disalg.met.api.state.LeaderElectionState;
 import org.disalg.met.server.TestingService;
 import org.disalg.met.server.event.LocalEvent;
@@ -71,14 +68,17 @@ public class LocalEventExecutor extends BaseEventExecutor{
                 LeaderElectionState role = testingService.getLeaderElectionState(nodeId);
                 if (role.equals(LeaderElectionState.FOLLOWING)) {
                     int eventType = event.getType();
-                    if (eventType == TestingDef.MessageType.NEWLEADER) { // release FollowerProcessNEWLEADERAfterCurrentEpochUpdated
-                        //  Post-condition: FollowerSendACKtoNEWLEADER by follower's QUORUM_PEER
+                    if (eventType == TestingDef.MessageType.NEWLEADER) {
+                        // post-condition:
+                        // 1. follower reply ACK-LD: FollowerSendACKtoNEWLEADER by follower's QUORUM_PEER
+                        // 2. follower log a proposal: LogRequest by follower's SYNC_PROCESSOR
+                        LOG.debug("Follower {} has updated CurrentEpoch during processing NEWLEADER.", nodeId);
                         testingService.getControlMonitor().notifyAll();
-                        testingService.waitSubnodeTypeSending(nodeId, SubnodeType.QUORUM_PEER);
-
-                        // let leader's corresponding learnerHandler be intercepted at ReadRecord
-                        testingService.getControlMonitor().notifyAll();
-                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(nodeId));
+//                        testingService.waitSubnodeTypeSending(nodeId, SubnodeType.QUORUM_PEER);
+//
+//                        // let leader's corresponding learnerHandler be intercepted at ReadRecord
+//                        testingService.getControlMonitor().notifyAll();
+//                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(nodeId));
                     }
                     else {
                         // TODO: deprecated since this branch will not be triggered!
@@ -102,14 +102,25 @@ public class LocalEventExecutor extends BaseEventExecutor{
                 testingService.getZxidSyncedMap().put(zxid, zxidSyncedMap.getOrDefault(zxid, 0) + 1);
 
                 // for log event and ack event
-                // leader will ack self, which is not intercepted
-                // follower will send ACK message to leader, which is intercepted only in follower
-                LOG.debug("wait follower {}'s SYNC thread be SENDING ACK", event.getNodeId());
                 if (LeaderElectionState.FOLLOWING.equals(testingService.getLeaderElectionState(nodeId))
                         && event.getFlag() != TestingDef.RetCode.NO_WAIT) {
-                    // Post-condition: FollowerSendACKtoPROPOSAL by follower's SYNC_PROCESSOR
-                    testingService.getControlMonitor().notifyAll();
-                    testingService.waitSubnodeInSendingState(subnodeId); // this is just for follower
+                    if (Phase.BROADCAST.equals(testingService.getNodePhases().get(nodeId))) {
+                        // During broadcast:
+                        // leader will ack self, which is not intercepted
+                        // follower will send ACK message to leader, which is intercepted only in follower
+                        LOG.debug("Wait for follower {}'s SYNC thread to be SENDING ACK", event.getNodeId());
+                        // Post-condition: FollowerSendACKtoPROPOSAL by follower's SYNC_PROCESSOR
+                        testingService.getControlMonitor().notifyAll();
+                        testingService.waitSubnodeInSendingState(subnodeId);
+                    } else {
+                        // During sync:
+                        // post-condition:
+                        // 1. follower reply ACK-LD: FollowerSendACKtoNEWLEADER by follower's QUORUM_PEER
+                        // 2. follower log a proposal: LogRequest by follower's SYNC_PROCESSOR
+                        LOG.debug("Follower {} has logged a proposal during sync.", nodeId);
+                        testingService.getControlMonitor().notifyAll();
+                    }
+
                 }
                 break;
             case COMMIT_PROCESSOR:  // leader / follower do commit

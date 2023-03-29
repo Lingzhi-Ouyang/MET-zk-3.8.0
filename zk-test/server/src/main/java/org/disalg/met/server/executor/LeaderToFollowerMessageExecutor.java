@@ -124,7 +124,7 @@ public class LeaderToFollowerMessageExecutor extends BaseEventExecutor {
                     // Updated 22/12: add an interceptor point after updating currentEpoch file
                     // Post-condition: SubmitLoggingTaskInProcessingNEWLEADER by the follower's QUORUM_PEER
                     testingService.getControlMonitor().notifyAll();
-                    testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
+//                    testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
 
                     // LOG.info("IF NOT intercepting update currentEpoch: " +
                     //       "leader releases NEWLEADER and follower will reply ACK: {}", event);

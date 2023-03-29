@@ -140,6 +140,17 @@ public class FollowerToLeaderMessageExecutor extends BaseEventExecutor {
                         testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
                     }
                     break;
+                case MessageType.PROPOSAL_IN_SYNC:
+                    if (followerPhase.equals(Phase.BROADCAST)) {
+                        LOG.info("follower replies to previous PROPOSAL_IN_SYNC message type : {}", event);
+
+                        // Post-condition:
+                        // let leader's corresponding learnerHandler process this ACK,
+                        // then again be intercepted at ReadRecord
+                        testingService.getControlMonitor().notifyAll();
+                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
+                    }
+                    break;
                 case MessageType.COMMIT:
                     LOG.warn("SOMETHING WRONG! Actually, FollowerCommit is a local event, " +
                             "and a follower SHOULD not reply a COMMIT message: {}", event);
