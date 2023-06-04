@@ -2,7 +2,7 @@
 
 This project is about distributed system explorative testing driven by models. 
 
-**Model-checking-driven explorative Testing (MET)** is an effective approach for understanding target distributed system design and detecting distributed system bugs. It combines the advantages of both model checking and testing.
+**Model-checking-driven Explorative Testing (MET)** is an effective approach for understanding target distributed system design and detecting distributed system bugs. It combines the advantages of both model checking and testing.
 
 At the design level, by modelling the target distributed system using lightweight formal languages such as TLA+ and the programming language, developers can make a deep comprehensive understanding upon the target system. Besides, test cases can be generated using the model checker easily. Since the model contains experts' domain knowledge, some subtle and deep bugs can be found during the model checking phase.
 
