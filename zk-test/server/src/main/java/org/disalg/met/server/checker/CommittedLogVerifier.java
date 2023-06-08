@@ -64,6 +64,15 @@ public class CommittedLogVerifier implements Verifier{
         int committedLen = lastCommittedZxidList.size();
         List<Long> leaderZxidRecords = testingService.getAllZxidRecords().get(nodeId);
         int leaderRecordLen = leaderZxidRecords.size();
-        return committedLen == leaderRecordLen;
+        if (committedLen > leaderRecordLen) return false;
+        for (int i = 0; i < committedLen; i++) {
+            if (!leaderZxidRecords.get(i).equals(lastCommittedZxidList.get(i)))
+                return false;
+        }
+        if (leaderRecordLen > committedLen) {
+            lastCommittedZxidList.addAll(leaderZxidRecords.subList(committedLen, leaderRecordLen));
+            LOG.info("\n---Update lastCommittedZxid " + testingService.getLastCommittedZxid());
+        }
+        return true;
     }
 }
