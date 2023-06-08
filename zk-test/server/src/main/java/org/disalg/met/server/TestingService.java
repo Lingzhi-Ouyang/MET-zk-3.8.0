@@ -415,8 +415,8 @@ public class TestingService implements TestingRemoteService {
         ExternalModelStatistics externalModelStatistics = new ExternalModelStatistics();
         ExternalModelStrategy externalModelStrategy = new ExternalModelStrategy(this,
                 new Random(1), schedulerConfiguration.getTraceDir(), externalModelStatistics);
-        bugReportWriter = new FileWriter(schedulerConfiguration.getWorkingDir() + File.separator
-                + schedulerConfiguration.getBugReportFile());
+//        bugReportWriter = new FileWriter(schedulerConfiguration.getWorkingDir() + File.separator
+//                + schedulerConfiguration.getBugReportFile());
         matchReportWriter = new FileWriter(schedulerConfiguration.getWorkingDir() + File.separator
                 + schedulerConfiguration.getMatchReportFile());
 
@@ -530,7 +530,7 @@ public class TestingService implements TestingRemoteService {
                             List<Integer> peers = participants.stream()
                                     .map(p -> serverIdMap.get(p.toString())).collect(Collectors.toList());
                             // get leader's accepted epoch
-//                            long modelAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
+                            // long modelAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
                             List<Integer> looking = null;
                             if (elements.getJSONArray("looking") != null) {
                                 looking = elements.getJSONArray("looking").stream()
@@ -561,12 +561,13 @@ public class TestingService implements TestingRemoteService {
 
                         // focus on last committed
                         case LeaderProcessACK: // release ACK && release learner handler's readRecord && release COMMIT
-                            int peerId3 = serverIdMap.get(elements.getString("peerId"));
-                            // TODO: should acquire peerId's last history item
-                            long leaderLastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
-                            LOG.debug("LeaderProcessACK modelZxid: {}", Long.toHexString(leaderLastCommitted));
+                            String followerNode = elements.getString("peerId");
+                            int peerId3 = serverIdMap.get(followerNode);
+                            long followerLastLogged = getLastZxidInNodeHistory(elements, followerNode);
+                            LOG.debug("LeaderProcessACK modelZxid: {}, which is last logged by follower {}",
+                                    Long.toHexString(followerLastLogged), peerId3);
                             totalExecuted = scheduleLeaderProcessACK(externalModelStrategy,
-                                    nodeId, peerId3, leaderLastCommitted, totalExecuted);
+                                    nodeId, peerId3, followerLastLogged, totalExecuted);
                             break;
                         case FollowerProcessCOMMIT: // release COMMIT
                             int peerId4 = serverIdMap.get(elements.getString("peerId"));
@@ -642,7 +643,10 @@ public class TestingService implements TestingRemoteService {
                             break;
                     }
 
-                    committedLogVerifier.verify();
+                    if (!committedLogVerifier.verify()) {
+                        bugReportWriter.write("Trace: " + traceName + "\n");
+                        bugReportWriter.write(statistics.toString() + "\n\n");
+                    }
                     statistics.reportCurrentStep("[Step " + (currentStep + 1) + "/" + stepCount + "]-" + action);
                     statistics.reportTotalExecutedEvents(totalExecuted);
                     statisticsWriter.write(statistics.toString() + "\n\n");
@@ -683,11 +687,11 @@ public class TestingService implements TestingRemoteService {
                 executionWriter.write("\ntrace time/ms: " + (System.currentTimeMillis() - traceStartTime) + "\n");
                 executionWriter.flush();
 
-                if (!matchedAndPassed) {
-                    bugCount++;
-                    bugReportWriter.write("Trace: " + traceName + "\n");
-                    bugReportWriter.write(statistics.toString() + "\n\n");
-                }
+//                if (!matchedAndPassed) {
+//                    bugCount++;
+//                    bugReportWriter.write("Trace: " + traceName + "\n");
+//                    bugReportWriter.write(statistics.toString() + "\n\n");
+//                }
                 if (!traceMatched) {
                     matchReportWriter.write("Trace: " + traceName + "\n");
                     matchReportWriter.write(statistics.toString() + "\n\n");
@@ -717,7 +721,7 @@ public class TestingService implements TestingRemoteService {
 
                 executionWriter.close();
                 statisticsWriter.close();
-                bugReportWriter.flush();
+//                bugReportWriter.flush();
                 matchReportWriter.flush();
             }
         }
@@ -725,16 +729,16 @@ public class TestingService implements TestingRemoteService {
         final int unmatchedCount = TraceVerifier.getUnmatchedCount();
         final int failedCount = TraceVerifier.getFailedCount();
         final float unmatchedRate = (float) unmatchedCount / traceNum ;
-        final float failedRate = (float) failedCount / traceNum ;
-        final float bugRate = (float) bugCount / traceNum ;
-        bugReportWriter.write("TOTAL: " + traceNum + "\n");
-        bugReportWriter.write("BUG:\t" + bugCount + "\tNO_BUG:\t" + (traceNum - bugCount) +
-                "\tBUG RATE:\t" + bugRate + "\n");
-        bugReportWriter.write("UNMATCH:\t" + unmatchedCount + "\tMATCH:\t" + (traceNum - unmatchedCount) +
-                "\tUNMATCHED RATE:\t" + unmatchedRate + "\n");
-        bugReportWriter.write("FAIL:\t" + failedCount + "\tPASS:\t" + (traceNum - failedCount) +
-                "\tFAIL RATE:\t" + failedRate + "\n");
-        bugReportWriter.close();
+//        final float failedRate = (float) failedCount / traceNum ;
+//        final float bugRate = (float) bugCount / traceNum ;
+        matchReportWriter.write("TOTAL: " + traceNum + "\n");
+//        bugReportWriter.write("BUG:\t" + bugCount + "\tNO_BUG:\t" + (traceNum - bugCount) +
+//                "\tBUG RATE:\t" + bugRate + "\n");
+//        bugReportWriter.write("UNMATCH:\t" + unmatchedCount + "\tMATCH:\t" + (traceNum - unmatchedCount) +
+//                "\tUNMATCHED RATE:\t" + unmatchedRate + "\n");
+//        bugReportWriter.write("FAIL:\t" + failedCount + "\tPASS:\t" + (traceNum - failedCount) +
+//                "\tFAIL RATE:\t" + failedRate + "\n");
+//        bugReportWriter.close();
         matchReportWriter.write("UNMATCH:\t" + unmatchedCount + "\tMATCH:\t" + (traceNum - unmatchedCount) +
                 "\tUNMATCHED RATE:\t" + unmatchedRate + "\n");
         matchReportWriter.close();
@@ -913,7 +917,7 @@ public class TestingService implements TestingRemoteService {
         return (epoch << 32L) | (counter & 0xffffffffL);
     }
     /***
-     * For action : LeaderProcessRequest & FollowerProcessPROPOSAL
+     * For action : LeaderProcessRequest & FollowerProcessPROPOSAL & LeaderProcessACK
      * variables -> history
      * @param elements
      * @param serverName
@@ -931,7 +935,7 @@ public class TestingService implements TestingRemoteService {
     }
 
     /***
-     * For action : LeaderProcessACK & FollowerProcessCOMMIT
+     * For action : FollowerProcessCOMMIT
      * variables -> lastCommitted
      * @param elements
      * @param serverName
@@ -4209,10 +4213,8 @@ public class TestingService implements TestingRemoteService {
                     if (NodeState.ONLINE.equals(nodeStates.get(nodeId))
                             && LeaderElectionState.LEADING.equals(leaderElectionStates.get(nodeId))
                             && Phase.BROADCAST.equals(nodePhases.get(nodeId))) {
-
                         lastCommittedZxid.add(lastProcessedZxid);
-                        executionWriter.write(
-                                "\n---Update lastCommittedZxid " + lastCommittedZxid);
+                        executionWriter.write("\n---Update lastCommittedZxid " + lastCommittedZxid);
                     }
                 }
 
