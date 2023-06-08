@@ -13,4 +13,4 @@ cd "$WORKING_DIR"/zk-test/test || exit
 tag=$(date "+%y-%m-%d-%H-%M-%S")
 mkdir $tag
 cp zk_log.properties $tag
-nohup java -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties $tag > $tag/$tag.out 2>&1 &
+nohup java -ea --add-opens=java.base/java.lang=ALL-UNNAMED -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties $tag > $tag/$tag.out 2>&1 &
