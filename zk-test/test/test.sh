@@ -6,13 +6,13 @@ ps -ef | grep zookeeper | grep -v grep | awk '{print $2}' | xargs kill -9
 SCRIPT_DIR=$(cd $(dirname "$0") || exit;pwd)
 WORKING_DIR=$(cd "$SCRIPT_DIR"/../.. || exit;pwd)
 
-echo "## Working directory: $WORKING_DIR"
-
-echo -e "\n==========Code level=========="
 cd "$WORKING_DIR"/zk-test/test || exit
 
 echo -e "\n>> Configuring test case directory..."
 TARGET_DIR="traces/demo"
+if [ -n "$1" ]; then
+  TARGET_DIR="traces/"$1
+fi
 sed -i -e "s|^traceDir =.*|traceDir = ${TARGET_DIR}|g" zookeeper.properties
 echo "## Test case directory: ${TARGET_DIR}"
 
