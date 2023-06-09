@@ -9,7 +9,7 @@ echo "## Working directory: $WORKING_DIR"
 
 echo -e "\n==========Model level=========="
 cd "$WORKING_DIR"/zk-test/test/generator || exit
-./run.sh
+bash run.sh
 
 echo -e "\n==========Code level=========="
 cd "$WORKING_DIR"/zk-test/test || exit
