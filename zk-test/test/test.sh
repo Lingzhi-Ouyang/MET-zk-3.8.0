@@ -23,7 +23,7 @@ mkdir -p "${REPLAY_DIR}"
 cp zk_log.properties "${REPLAY_DIR}"
 echo "## Output directory: ${REPLAY_DIR}"
 
-echo -e "\n>> Running test..."
+echo -e "\n>> Running test...\n"
 JAVA_VERSION=$(java -version 2>&1 |awk -F '[".]+' 'NR==1{ print $2 }')
 if [[ $JAVA_VERSION -le 8 ]]; then
   nohup java -ea -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties ${REPLAY_DIR} > ${REPLAY_DIR}/${tag}.out 2>&1 &

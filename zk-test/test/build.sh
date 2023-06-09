@@ -9,6 +9,6 @@ WORKING_DIR=$(cd "$SCRIPT_DIR"/../.. || exit;pwd)
 echo "## Working directory: $WORKING_DIR"
 
 # build
-echo ">> Building project..."
+echo -e "\n>> Building project...\n"
 cd "$WORKING_DIR"/zk-test && mvn clean install -DskipTests
 echo "Done!"
