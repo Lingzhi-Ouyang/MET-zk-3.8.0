@@ -8,22 +8,30 @@ WORKING_DIR=$(cd "$SCRIPT_DIR"/../.. || exit;pwd)
 
 echo "## Working directory: $WORKING_DIR"
 
+echo -e "\n==========Code level=========="
+
 # build
-echo ">> Building project..."
+echo -e "\n>> Building project..."
 cd "$WORKING_DIR"/zk-test && mvn clean install -DskipTests
 
-# run tests
-echo ">> Running test..."
 cd "$WORKING_DIR"/zk-test/test || exit
-tag=$(date "+%y-%m-%d-%H-%M-%S")
-mkdir $tag
-echo "## Output directory: $(pwd)/$tag"
-cp zk_log.properties $tag
 
+echo -e "\n>> Configuring test case directory..."
+TARGET_DIR="traces/demo"
+sed -i -e "s|^traceDir =.*|traceDir = ${TARGET_DIR}|g" zookeeper.properties
+echo "## Test case directory: ${TARGET_DIR}"
+
+echo -e "\n>> Setting output directory..."
+tag=$(date "+%y-%m-%d-%H-%M-%S")
+REPLAY_DIR="${TARGET_DIR}_replay_${tag}"
+mkdir -p "${REPLAY_DIR}"
+cp zk_log.properties "${REPLAY_DIR}"
+echo "## Output directory: ${REPLAY_DIR}"
+
+echo -e "\n>> Running test..."
 JAVA_VERSION=$(java -version 2>&1 |awk -F '[".]+' 'NR==1{ print $2 }')
 if [[ $JAVA_VERSION -le 8 ]]; then
-  # enable assertions!
-  nohup java -ea -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties $tag > $tag/$tag.out 2>&1 &
+  nohup java -ea -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties ${REPLAY_DIR} > ${REPLAY_DIR}/${tag}.out 2>&1 &
 else
-  nohup java -ea --add-opens=java.base/java.lang=ALL-UNNAMED -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties $tag > $tag/$tag.out 2>&1 &
+  nohup java -ea --add-opens=java.base/java.lang=ALL-UNNAMED -jar ../zookeeper-ensemble/target/zookeeper-ensemble-jar-with-dependencies.jar zookeeper.properties ${REPLAY_DIR} > ${REPLAY_DIR}/${tag}.out 2>&1 &
 fi

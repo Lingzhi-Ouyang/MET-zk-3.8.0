@@ -52,7 +52,8 @@ public class ZookeeperEnsemble implements Ensemble, SchedulerConfigurationPostLo
         final File logDir = new File(nodeDir, "log");
         final File outputFile = new File(nodeDir, "out");
         final File confFile = new File(nodeDir, "conf");
-        final File classpathFile = new File(zookeeperConfiguration.getWorkingDir(), ".." + File.separator + zookeeperConfiguration.getClasspath());
+        final File classpathFile = new File(zookeeperConfiguration.getWorkingDir(),
+                ".." + File.separator + ".." + File.separator + zookeeperConfiguration.getClasspath());
 
         final String zookeeperLogDirOption = "-Dzookeeper.log.dir=" + logDir;
         final String appleAwtUIElementOption = "-Dapple.awt.UIElement=true"; // Suppress the Dock icon and menu bar on Mac OS X
