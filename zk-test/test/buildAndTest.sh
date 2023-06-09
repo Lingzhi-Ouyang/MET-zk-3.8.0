@@ -6,16 +6,18 @@ ps -ef | grep zookeeper | grep -v grep | awk '{print $2}' | xargs kill -9
 SCRIPT_DIR=$(cd $(dirname "$0") || exit;pwd)
 WORKING_DIR=$(cd "$SCRIPT_DIR"/../.. || exit;pwd)
 
-echo "Working directory: $WORKING_DIR"
+echo "## Working directory: $WORKING_DIR"
 
 # build
+echo ">> Building project..."
 cd "$WORKING_DIR"/zk-test && mvn clean install -DskipTests
 
 # run tests
+echo ">> Running test..."
 cd "$WORKING_DIR"/zk-test/test || exit
 tag=$(date "+%y-%m-%d-%H-%M-%S")
 mkdir $tag
-echo "Output directory: $(pwd)/$tag"
+echo "## Output directory: $(pwd)/$tag"
 cp zk_log.properties $tag
 
 JAVA_VERSION=$(java -version 2>&1 |awk -F '[".]+' 'NR==1{ print $2 }')
