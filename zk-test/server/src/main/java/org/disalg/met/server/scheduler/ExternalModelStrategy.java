@@ -140,7 +140,6 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                 if (file.isFile() && file.exists()) {
                     Trace trace = importTrace(file);
                     if (null == trace) continue;
-                    if (!file.getName().endsWith(".json")) continue;
                     traces.add(trace);
                     count++;
                 } else {
@@ -157,7 +156,7 @@ public class ExternalModelStrategy implements SchedulingStrategy{
     public Trace importTrace(File file) throws IOException {
         String filename = file.getName();
         // Only json files will be parsed
-        if(filename.startsWith(".") || !filename.endsWith(".json")) {
+        if( !filename.endsWith(".json") || filename.startsWith(".") ) {
             return null;
         }
         LOG.debug("Importing trace from file {}", filename);
@@ -179,41 +178,39 @@ public class ExternalModelStrategy implements SchedulingStrategy{
         read.close();
 
         // parse json & store to the EventSequence structure
-
         String fileTxt = sb.toString().replaceAll("\r\n", "");
-        JSONArray jsonArray = new JSONArray();
+        JSONArray stateSeq = new JSONArray();
         if (StringUtils.isNoneBlank(fileTxt)) {
-            jsonArray = JSONArray.parseArray(fileTxt);
+            stateSeq = JSONArray.parseArray(fileTxt);
         }
-
 
         // get cluster info
-        JSONObject serverInfo = (JSONObject) jsonArray.remove(0);
-        int serverNum = (int) serverInfo.get("server_num");
-        List<String> serverIds = (List<String>) serverInfo.get("server_id");
-        // By default, the node mapping:
-        // s0 : id = 2
-        // s1 : id = 1
-        // s2 : id = 0
+        JSONObject metadata = (JSONObject) stateSeq.remove(0);
+        String modelVersion = metadata.containsKey("version") ? metadata.getString("version") : "UNKNOWN";
+        int serverNum = (int) metadata.get("server_num");
+        List<String> serverIds = (List<String>) metadata.get("server_id");
+        LOG.debug("modelVersion: {}, serverNum: {}, serverId: {}, eventCount: {}",
+                modelVersion, serverNum, serverIds, stateSeq.size());
 
-        int eventCount = jsonArray.size();
-        Trace trace = new Trace(filename, serverNum, serverIds, jsonArray);
-        LOG.debug("serverNum: {}, serverId: {}, eventCount: {}, jsonArraySize: {}",
-                serverNum, serverIds, eventCount, eventCount);
-
-        Set<String> keys = new HashSet<>();
-        List<String> events = new LinkedList<>();
-        for (int i = 0; i < eventCount; i++) {
-            JSONObject jsonObject = (JSONObject) jsonArray.get(i);
-            String key = jsonObject.keySet().iterator().next();
-            keys.add(key);
-            events.add(key);
-        }
-        LOG.debug("keySize: {}", keys.size());
-        LOG.debug("keys: {}", keys);
-        LOG.debug("events: {}", events);
+        Trace trace = new Trace(filename, modelVersion, serverNum, serverIds, stateSeq);
+        summarizeTrace(stateSeq);
 
         return trace;
+    }
+
+    void summarizeTrace(JSONArray stateSeq) {
+        Set<String> keys = new HashSet<>();
+        List<String> events = new LinkedList<>();
+        for (Object o : stateSeq) {
+            JSONObject jsonObject = (JSONObject) o;
+            Iterator<String> keyIterator = jsonObject.keySet().iterator();
+            String key = keyIterator.next();
+            String action = key.equals("Step") ? keyIterator.next() : key;
+            keys.add(action);
+            events.add(action);
+        }
+        LOG.debug("keySize: {}, keys: {}", keys.size(), keys);
+        LOG.debug("eventCount: {}, events: {}", events.size(), events);
     }
 
     public Event getNextInternalEvent(ModelAction action, int nodeId, int peerId, long modelZxid) throws SchedulerConfigurationException {
@@ -226,7 +223,6 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                 enabled.add(event);
             }
         }
-
         statistics.reportNumberOfEnabledEvents(enabled.size());
 
         if (enabled.size() == 0) {
@@ -249,6 +245,7 @@ public class ExternalModelStrategy implements SchedulingStrategy{
             case FollowerProcessUPTODATE: // leader to release UPTODATE
             case LeaderToFollowerProposal: // leader to release PROPOSAL
             case LeaderToFollowerCOMMIT: // leader to release COMMIT
+                LOG.debug("action:{}, peerId: {}, nodeId: {}, modelZxid: {} ", action, peerId, nodeId, modelZxid);
                 searchLeaderMessage(action, peerId, nodeId, modelZxid, enabled);
                 break;
             case LeaderLog:
@@ -299,12 +296,15 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                         } else {
                             if (!action.equals(ModelAction.LeaderToFollowerProposal)) continue;
                             // check the equality between zxid mapping from model to code
+                            // modelZxid < 0 : no need for conformance checking
                             if (modelZxid > 0) {
                                 LOG.debug("LeaderToFollowerProposal, check getModelToCodeZxidMap: {}, {}, {}",
                                         Long.toHexString(modelZxid),
                                         Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                         Long.toHexString(event.getZxid()));
                                 if (event.getZxid() != testingService.getModelToCodeZxidMap().get(modelZxid)) continue;
+                            } else {
+                                LOG.debug("modelZxid {} < 0 : no need for conformance checking", Long.toHexString(modelZxid));
                             }
                         }
                         break;
@@ -320,6 +320,8 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                                         Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                         Long.toHexString(event.getZxid()));
                                 if (event.getZxid() != testingService.getModelToCodeZxidMap().get(modelZxid)) continue;
+                            } else {
+                                LOG.debug("modelZxid {} < 0 : no need for conformance checking", Long.toHexString(modelZxid));
                             }
                         }
                         break;
@@ -370,12 +372,15 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                     case MessageType.PROPOSAL_IN_SYNC:
                         if (!action.equals(ModelAction.FollowerToLeaderACK) ) continue;
                         // check the equality between zxid mapping from model to code
+                        // modelZxid < 0 : no need for conformance checking
                         if (modelZxid > 0) {
                             LOG.debug("FollowerToLeaderACK, check getModelToCodeZxidMap: {}, {}, {}",
                                     Long.toHexString(modelZxid),
                                     Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                     Long.toHexString(event.getZxid()));
                             if (event.getZxid() != testingService.getModelToCodeZxidMap().get(modelZxid)) continue;
+                        } else {
+                            LOG.debug("modelZxid {} < 0 : no need for conformance checking", Long.toHexString(modelZxid));
                         }
                         break;
                     default:
@@ -407,12 +412,16 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                         final long eventZxid = event.getZxid();
                         if (!subnodeType.equals(SubnodeType.SYNC_PROCESSOR)) continue;
                         // since leaderLog always come first, here record the zxid mapping from model to code
+                        // modelZxid < 0 : no need for conformance checking
                         if (modelZxid > 0) {
                             testingService.getModelToCodeZxidMap().put(modelZxid, eventZxid);
                             LOG.debug("LeaderLog, check getModelToCodeZxidMap: {}, {}, {}",
                                     Long.toHexString(modelZxid),
                                     Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                     Long.toHexString(event.getZxid()));
+                        } else {
+                            LOG.debug("modelZxid {} < 0 : no need to store modelZxid for conformance checking",
+                                    Long.toHexString(modelZxid));
                         }
                         break;
                     case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
@@ -423,12 +432,15 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                     case FollowerLog:
                         if (!subnodeType.equals(SubnodeType.SYNC_PROCESSOR)) continue;
                         // check the equality between zxid mapping from model to code
+                        // modelZxid < 0 : no need for conformance checking
                         if (modelZxid > 0) {
                             LOG.debug("FollowerLog, check getModelToCodeZxidMap: {}, {}, {}",
                                     Long.toHexString(modelZxid),
                                     Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                     Long.toHexString(event.getZxid()));
                             if (event.getZxid() != testingService.getModelToCodeZxidMap().get(modelZxid)) continue;
+                        } else {
+                            LOG.debug("modelZxid {} < 0 : no need for conformance checking", Long.toHexString(modelZxid));
                         }
                         break;
                     case FollowerProcessPROPOSAL:  // DEPRECATED
@@ -445,12 +457,15 @@ public class ExternalModelStrategy implements SchedulingStrategy{
 //                    case FollowerProcessCOMMIT: // DEPRECATED
                         if (!subnodeType.equals(SubnodeType.COMMIT_PROCESSOR)) continue;
                         // check the equality between zxid mapping from model to code
+                        // modelZxid < 0 : no need for conformance checking
                         if (modelZxid > 0) {
                             LOG.debug("ProcessCOMMIT, check getModelToCodeZxidMap: {}, {}, {}",
                                     Long.toHexString(modelZxid),
                                     Long.toHexString(testingService.getModelToCodeZxidMap().get(modelZxid)),
                                     Long.toHexString(event.getZxid()));
                             if (event.getZxid() != testingService.getModelToCodeZxidMap().get(modelZxid)) continue;
+                        } else {
+                            LOG.debug("modelZxid {} < 0 : no need for conformance checking", Long.toHexString(modelZxid));
                         }
                         break;
                     default:
