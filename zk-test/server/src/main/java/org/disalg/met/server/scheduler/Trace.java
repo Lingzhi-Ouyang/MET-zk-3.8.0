@@ -12,14 +12,16 @@ public class Trace {
     private static final Logger LOG = LoggerFactory.getLogger(Trace.class);
 
     private final String traceName;
+    private final String modelVer;
     private final JSONArray executionSteps = new JSONArray();
     private int currentIdx;
     private int stepCount;
     private int serverNum;
     private List<String> serverIds;
 
-    public Trace(String traceName, int serverNum, List<String> serverIds, JSONArray jsonArray) {
+    public Trace(String traceName, String modelVer, int serverNum, List<String> serverIds, JSONArray jsonArray) {
         this.traceName = traceName;
+        this.modelVer = modelVer;
         this.serverNum = serverNum;
         this.serverIds = serverIds;
         this.currentIdx = -1;
@@ -30,6 +32,10 @@ public class Trace {
 
     public String getTraceName() {
         return traceName;
+    }
+
+    public String getModelVer() {
+        return modelVer;
     }
 
     public int getServerNum() {
@@ -77,6 +83,7 @@ public class Trace {
     public String toString() {
         return "Trace{" +
                 "traceName='" + traceName + '\'' +
+                ", modelVersion=" + modelVer +
                 ", executionSteps=" + executionSteps +
                 ", currentIdx=" + currentIdx +
                 ", stepCount=" + stepCount +
