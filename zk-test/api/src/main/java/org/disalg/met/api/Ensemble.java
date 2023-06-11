@@ -10,6 +10,8 @@ public interface Ensemble {
 
     void configureEnsemble(String executionId) throws SchedulerConfigurationException;
 
+    void configureEnsemble(String executionId, int serverNum) throws SchedulerConfigurationException;
+
     void startEnsemble();
 
     void stopEnsemble();

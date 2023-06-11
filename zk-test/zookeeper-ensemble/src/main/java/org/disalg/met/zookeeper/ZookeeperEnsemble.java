@@ -140,4 +140,13 @@ public class ZookeeperEnsemble implements Ensemble, SchedulerConfigurationPostLo
         }
     }
 
+    @Override
+    public void configureEnsemble(final String executionId, final int serverNum) throws SchedulerConfigurationException {
+        this.executionId = executionId;
+        zookeeperConfiguration.setNumNodes(serverNum);
+        for (int i = 0; i < serverNum; ++i) {
+            zookeeperConfiguration.configureNode(executionId, i, "node");
+        }
+    }
+
 }
