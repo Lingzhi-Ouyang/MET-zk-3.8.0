@@ -422,13 +422,8 @@ public class TestingService implements TestingRemoteService {
 
         long startTime = System.currentTimeMillis();
         int traceNum = externalModelStrategy.getTracesNum();
-        LOG.debug("traceNum: {}", traceNum);
+        LOG.debug("Number of traces: {}", traceNum);
         int bugCount = 0;
-
-        Map<String, Integer> serverIdMap = new HashMap<>(3);
-        serverIdMap.put("s0", 2);
-        serverIdMap.put("s1", 1);
-        serverIdMap.put("s2", 0);
 
         for (int executionId = 1; executionId <= traceNum; ++executionId) {
             externalModelStrategy.clearEvents();
@@ -438,14 +433,30 @@ public class TestingService implements TestingRemoteService {
             Trace trace = externalModelStrategy.getCurrentTrace(executionId - 1);
             String traceName = trace.getTraceName();
             int stepCount = trace.getStepCount();
-            LOG.info("\n\n\n\n\nTrace {}: {}, total steps: {}", executionId, traceName, stepCount);
+            System.out.println("\n\n\n\n\n");
+            LOG.info(">> Replaying Trace {}: {}, total steps: {}", executionId, traceName, stepCount);
 
-            ensemble.configureEnsemble(traceName);
+            // configure servers
+            final int serverNum = trace.getServerNum();
+            Map<String, Integer> serverIdMap = new HashMap<>();
+            // By default, node mapping in reverse order like:
+            // s0 : id = 2
+            // s1 : id = 1
+            // s2 : id = 0
+            int serverId = serverNum;
+            for (String serverStr : trace.getServerIds()) {
+                serverIdMap.put(serverStr, --serverId);
+            }
+            LOG.debug(">> server num: {}, server mapping: {}", serverNum, serverIdMap);
+            assert serverId == 0;
 
-            int totalExecuted = 0;
+            // create trace directory, including each server's working directory.
+            ensemble.configureEnsemble(traceName, serverNum);
 
+            // create trace execution file
             executionWriter = new FileWriter(schedulerConfiguration.getWorkingDir() + File.separator
                     + traceName + File.separator + schedulerConfiguration.getExecutionFile());
+            // create trace statistics file
             statisticsWriter = new FileWriter(schedulerConfiguration.getWorkingDir() + File.separator
                     + traceName + File.separator + schedulerConfiguration.getStatisticsFile());
 
@@ -459,6 +470,7 @@ public class TestingService implements TestingRemoteService {
             // Start the timer for recoding statistics
             statistics.startTimer();
 
+            int totalExecuted = 0;
             int currentStep = 0;
             String action = "";
             ModelAction modelAction;
@@ -1828,7 +1840,7 @@ public class TestingService implements TestingRemoteService {
         }
 
         // createSession
-        LOG.debug("\n\n\n------------------Processing proposal: createSession------------------");
+        LOG.debug("------------------Processing proposal: createSession------------------");
         scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderLog,
                 leaderId, -1, -1, totalExecuted, 5);
         // followerProcessProposal
