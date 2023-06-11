@@ -12,6 +12,8 @@ public interface SchedulerConfiguration {
 
     int getNumNodes();
 
+    void setNumNodes(int num);
+
     int getNumCrashes();
 
     int getNumCrashesAfterElection();

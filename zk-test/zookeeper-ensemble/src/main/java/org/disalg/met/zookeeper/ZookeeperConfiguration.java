@@ -169,6 +169,11 @@ public class ZookeeperConfiguration implements SchedulerConfiguration {
     }
 
     @Override
+    public void setNumNodes(int num) {
+        numNodes = num;
+    }
+
+    @Override
     public int getNumCrashes() {
         return numCrashes;
     }
