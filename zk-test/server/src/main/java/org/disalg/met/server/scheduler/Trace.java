@@ -2,6 +2,7 @@ package org.disalg.met.server.scheduler;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import org.disalg.met.api.ModelVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,14 +13,14 @@ public class Trace {
     private static final Logger LOG = LoggerFactory.getLogger(Trace.class);
 
     private final String traceName;
-    private final String modelVer;
+    private final ModelVersion modelVer;
     private final JSONArray executionSteps = new JSONArray();
     private int currentIdx;
     private int stepCount;
     private int serverNum;
     private List<String> serverIds;
 
-    public Trace(String traceName, String modelVer, int serverNum, List<String> serverIds, JSONArray jsonArray) {
+    public Trace(String traceName, ModelVersion modelVer, int serverNum, List<String> serverIds, JSONArray jsonArray) {
         this.traceName = traceName;
         this.modelVer = modelVer;
         this.serverNum = serverNum;
@@ -34,7 +35,7 @@ public class Trace {
         return traceName;
     }
 
-    public String getModelVer() {
+    public ModelVersion getModelVer() {
         return modelVer;
     }
 
