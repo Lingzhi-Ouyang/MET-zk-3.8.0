@@ -186,7 +186,8 @@ public class ExternalModelStrategy implements SchedulingStrategy{
 
         // get cluster info
         JSONObject metadata = (JSONObject) stateSeq.remove(0);
-        String modelVersion = metadata.containsKey("version") ? metadata.getString("version") : "UNKNOWN";
+        ModelVersion modelVersion = metadata.containsKey("version") ?
+                ModelVersion.valueOf(metadata.getString("version")) : ModelVersion.DEFAULT;
         int serverNum = (int) metadata.get("server_num");
         List<String> serverIds = (List<String>) metadata.get("server_id");
         LOG.debug("modelVersion: {}, serverNum: {}, serverId: {}, eventCount: {}",
