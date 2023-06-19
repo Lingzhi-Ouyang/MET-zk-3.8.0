@@ -73,31 +73,10 @@ public class FollowerToLeaderMessageExecutor extends BaseEventExecutor {
                     testingService.getNodePhases().set(followerId, Phase.SYNC);
 
                     LOG.info("follower replies ACKEPOCH : {}", event);
+                    long leaderAcceptedEpoch = testingService.getAcceptedEpoch(leaderId);
                     // Post-condition: wait for leader update currentEpoch file
                     testingService.getControlMonitor().notifyAll();
-                    testingService.waitCurrentEpochUpdated(leaderId);
-
-                    // Post-condition:
-                    // for zk-3.5/6/7/8:
-                    // - DIFF / TRUNC: let follower mapping to the leader's corresponding learnerHandlerSender
-                    // - SNAP: the corresponding learnerHandlerSender will not be created here
-                    testingService.getControlMonitor().notifyAll();
-                    testingService.waitSyncTypeDetermined(followerId);
-                    final int syncType = testingService.getSyncType(followerId);
-                    LOG.info("Leader {} is going to sync with follower {} using {}", leaderId, followerId, syncType);
-
-                    if ( syncType == MessageType.DIFF || syncType == MessageType.TRUNC ) {
-                        // Post-condition: let follower mapping to the leader's corresponding learnerHandlerSender
-                        testingService.getControlMonitor().notifyAll();
-                        testingService.waitFollowerMappingLearnerHandlerSender(followerId);
-                        // Post-condition for DIFF / TRUNC: let leader's corresponding learnerHandlerSender sending DIFF / TRUNC
-                        testingService.getControlMonitor().notifyAll();
-                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
-                    } else {
-                        // Post-condition for SNAP: let leader's corresponding learnerHandler sending SNAP
-                        testingService.getControlMonitor().notifyAll();
-                        testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
-                    }
+                    testingService.waitCurrentEpochUpdated(leaderId, leaderAcceptedEpoch);
                     break;
                 case MessageType.NEWLEADER:     // releasing my ACK-LD.
                     // ---------------DEPRECATED---------------
