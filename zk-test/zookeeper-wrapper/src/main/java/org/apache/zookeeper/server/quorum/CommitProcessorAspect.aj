@@ -157,14 +157,7 @@ public privileged aspect CommitProcessorAspect {
                     " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
             return;
         }
-//        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-//            LOG.debug("COMMIT threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
-//            return;
-//        }
-//        if (subnodeId == TestingDef.RetCode.BACK_TO_LOOKING) {
-//            LOG.debug("COMMIT threadId: {}, subnodeId == -200, indicating the node is going to become looking", threadId);
-//            return;
-//        }
+
         final int type =  request.type;
         try {
             // before offerMessage: increase sendingSubnodeNum

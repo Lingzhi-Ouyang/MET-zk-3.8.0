@@ -128,28 +128,17 @@ public aspect SyncRequestProcessorAspect {
             return;
         }
 
-//        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-//            LOG.debug("SYNC threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
-//            return;
-//        }
-//        if (subnodeId == TestingDef.RetCode.BACK_TO_LOOKING) {
-//            LOG.debug("SYNC threadId: {}, subnodeId == -200, indicating the node is going to become looking", threadId);
-//            return;
-//        }
-
         if (request == null){
             LOG.debug("------Using poll() just now and found no request! Flush now and using take()...");
             return;
         }
         if (request instanceof Request) {
-//            this.request = (Request) request;
             LOG.debug("It's a request {}", request);
             final String payload = quorumPeerAspect.constructRequest((Request) request);
             final int type =  ((Request) request).type;
             try {
                 // before offerMessage: increase sendingSubnodeNum
                 quorumPeerAspect.setSubnodeSending();
-//                int lastSyncRequestId = intercepter.getTestingService().logRequestMessage(subnodeId, payload, type);
                 final long zxid = ((Request) request).zxid;
                 final int lastSyncRequestId =
                         testingService.offerLocalEvent(subnodeId, SubnodeType.SYNC_PROCESSOR, zxid, payload, type);

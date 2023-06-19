@@ -216,6 +216,7 @@ public aspect LearnerHandlerAspect {
         if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
             LOG.debug("LearnerHandlerSender threadId: {}, subnodeId: {}, lastMsgId: {}," +
                     " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            proceed(r, s);
             return;
         }
         QuorumPacket packet = (QuorumPacket) r;
@@ -383,6 +384,7 @@ public aspect LearnerHandlerAspect {
         if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
             LOG.debug("LearnerHandler threadId: {}, subnodeId: {}, lastMsgId: {}," +
                     " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            proceed(r, s);
             return;
         }
 
@@ -416,7 +418,6 @@ public aspect LearnerHandlerAspect {
                 // just drop the message
                 LOG.debug("partition occurs! just drop the message.");
                 throw new SocketTimeoutException();
-//                return;
             }
             if (lastPacketId == TestingDef.RetCode.BACK_TO_LOOKING) {
                 LOG.debug("LearnerHandler threadId: {}, event == -200, indicating the node is going to become looking", threadId);
