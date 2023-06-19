@@ -1,6 +1,7 @@
 package org.apache.zookeeper.server.quorum;
 
 import org.apache.jute.Record;
+import org.disalg.met.api.MessageType;
 import org.disalg.met.api.SubnodeType;
 import org.disalg.met.api.TestingDef;
 import org.slf4j.Logger;
@@ -12,7 +13,6 @@ import java.rmi.RemoteException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /***
  * This intercepts the message sending process of the learnerHandler threads on the leader side
@@ -44,6 +44,13 @@ public aspect LearnerHandlerAspect {
         } catch (RuntimeException e) {
             LOG.debug("--------catch exception: {}", e.toString());
             throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("before runLearnerHandler-------Thread: {}, subnodeId < 0: {}, " +
+                    "indicating the node is STOPPING or OFFLINE. " +
+                    "This subnode is not registered at the testing engine.\" +" +
+                    "------", threadId, subnodeId);
+            return;
         }
         try {
             intercepter.getTestingService().setReceivingState(subnodeId);
@@ -92,9 +99,24 @@ public aspect LearnerHandlerAspect {
         final String childThreadName = childThread.getName();
         LOG.debug("before runSender-------parent thread {}: {}------", threadId, threadName);
         LOG.debug("before runSender-------child Thread {}: {}------", childThreadId, childThreadName);
-        quorumPeerAspect.registerSubnode(childThreadId, childThreadName, SubnodeType.LEARNER_HANDLER_SENDER);
+        QuorumPeerAspect.SubnodeIntercepter intercepter =
+                quorumPeerAspect.registerSubnode(childThreadId, childThreadName, SubnodeType.LEARNER_HANDLER_SENDER);
         learnerHandlerSenderThreadMap.put(threadId, childThreadId);
         learnerHandlerThreadMap.put(childThreadId, threadId);
+        int subnodeId = -1;
+        try{
+            subnodeId = intercepter.getSubnodeId();
+        } catch (RuntimeException e) {
+            LOG.debug("--------catch exception: {}", e.toString());
+            throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("before runLearnerHandlerSender-------Thread: {}, subnodeId < 0: {}, " +
+                    "indicating the node is STOPPING or OFFLINE. " +
+                    "This subnode is not registered at the testing engine.\" +" +
+                    "------", threadId, subnodeId);
+            return;
+        }
     }
 
 
@@ -114,17 +136,27 @@ public aspect LearnerHandlerAspect {
         LOG.debug("before advice of learner handler send-------Thread: {}, {}------", threadId, threadName);
 
         QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-        int subnodeId;
+        int subnodeId = -1;
+        Integer lastMsgId = null;
         try{
             subnodeId = intercepter.getSubnodeId();
+            lastMsgId = intercepter.getLastMsgId();
         } catch (RuntimeException e) {
             LOG.debug("--------catch exception: {}", e.toString());
             throw new RuntimeException(e);
         }
-        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-            LOG.debug("LearnerHandlerSender threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+        if (subnodeId < 0) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
             return;
         }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            return;
+        }
+
         LOG.debug("--------------My queuedPackets has {} element.",
                 queue.size());
 
@@ -166,15 +198,24 @@ public aspect LearnerHandlerAspect {
         LOG.debug("before advice of learner handler sender-------Thread: {}, {}------", threadId, threadName);
 
         QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-        int subnodeId;
+        int subnodeId = -1;
+        Integer lastMsgId = null;
         try{
             subnodeId = intercepter.getSubnodeId();
+            lastMsgId = intercepter.getLastMsgId();
         } catch (RuntimeException e) {
             LOG.debug("--------catch exception: {}", e.toString());
             throw new RuntimeException(e);
         }
-        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-            LOG.debug("LearnerHandlerSender threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+        if (subnodeId < 0) {
+            LOG.debug("LearnerHandlerSender threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
+            return;
+        }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("LearnerHandlerSender threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
             return;
         }
         QuorumPacket packet = (QuorumPacket) r;
@@ -194,6 +235,7 @@ public aspect LearnerHandlerAspect {
             final long zxid = packet.getZxid();
             final int lastPacketId = intercepter.getTestingService()
                     .offerLeaderToFollowerMessage(subnodeId, receivingAddr, zxid, payload, type);
+            intercepter.setLastMsgId(lastPacketId);
             LOG.debug("lastPacketId = {}", lastPacketId);
 
             // to check if the node is crashed
@@ -211,6 +253,9 @@ public aspect LearnerHandlerAspect {
                 // just drop the message
                 LOG.debug("partition occurs! just drop the message.");
                 throw new IOException();
+            }
+            if (lastPacketId == TestingDef.RetCode.BACK_TO_LOOKING) {
+                LOG.debug("LearnerHandlerSender threadId: {}, event == -200, indicating the node is going to become looking", threadId);
             }
 
             proceed(r, s);
@@ -241,15 +286,24 @@ public aspect LearnerHandlerAspect {
         LOG.debug("before advice of learnerHandlerReadRecord-------Thread: {}, {}------", threadId, threadName);
 
         QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-        int subnodeId;
+        int subnodeId = -1;
+        Integer lastMsgId = null;
         try{
             subnodeId = intercepter.getSubnodeId();
+            lastMsgId = intercepter.getLastMsgId();
         } catch (RuntimeException e) {
             LOG.debug("--------catch exception: {}", e.toString());
             throw new RuntimeException(e);
         }
-        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-            LOG.debug("LearnerHandler threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+        if (subnodeId < 0) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
+            return;
+        }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
             return;
         }
 
@@ -261,6 +315,7 @@ public aspect LearnerHandlerAspect {
             final String receivingAddr = threadName.split("-")[1];
             final int lastPacketId = intercepter.getTestingService().offerLeaderToFollowerMessage(
                     subnodeId, receivingAddr, -1L, null, TestingDef.MessageType.learnerHandlerReadRecord);
+            intercepter.setLastMsgId(lastPacketId);
             LOG.debug("learnerHandlerReadRecord lastPacketId = {}", lastPacketId);
 
             quorumPeerAspect.postSend(intercepter, subnodeId, lastPacketId);
@@ -275,6 +330,10 @@ public aspect LearnerHandlerAspect {
                 throw new SocketTimeoutException();
 //                return;
             }
+            if (lastPacketId == TestingDef.RetCode.BACK_TO_LOOKING) {
+                LOG.debug("LearnerHandler threadId: {}, event == -200, indicating the node is going to become looking", threadId);
+            }
+
         } catch (RemoteException | SocketTimeoutException e) {
             LOG.debug("Encountered a remote exception", e);
             throw new RuntimeException(e);
@@ -307,16 +366,26 @@ public aspect LearnerHandlerAspect {
 
         QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
         int subnodeId = -1;
+        Integer lastMsgId = null;
         try{
             subnodeId = intercepter.getSubnodeId();
+            lastMsgId = intercepter.getLastMsgId();
         } catch (RuntimeException e) {
-            LOG.debug("--------catch exception in learnerHandlerWriteRecord: {}", e.toString());
+            LOG.debug("--------catch exception: {}", e.toString());
             throw new RuntimeException(e);
         }
-        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-            LOG.debug("LearnerHandler threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+        if (subnodeId < 0) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
             return;
         }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            return;
+        }
+
         // Intercept QuorumPacket
         QuorumPacket packet = (QuorumPacket) r;
         final String payload = quorumPeerAspect.packetToString(packet);
@@ -334,6 +403,7 @@ public aspect LearnerHandlerAspect {
             final long zxid = packet.getZxid();
             final int lastPacketId = intercepter.getTestingService()
                     .offerLeaderToFollowerMessage(subnodeId, receivingAddr, zxid, payload, type);
+            intercepter.setLastMsgId(lastPacketId);
             LOG.debug("learnerHandlerWriteRecord lastPacketId = {}", lastPacketId);
 
             quorumPeerAspect.postSend(intercepter, subnodeId, lastPacketId);
@@ -348,9 +418,72 @@ public aspect LearnerHandlerAspect {
                 throw new SocketTimeoutException();
 //                return;
             }
+            if (lastPacketId == TestingDef.RetCode.BACK_TO_LOOKING) {
+                LOG.debug("LearnerHandler threadId: {}, event == -200, indicating the node is going to become looking", threadId);
+            }
 
             proceed(r, s);
         } catch (RemoteException | SocketTimeoutException e ) {
+            LOG.debug("Encountered a remote exception", e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    pointcut learnerHandlerSyncFollower(long zxid, LearnerMaster lm):
+            withincode(* org.apache.zookeeper.server.quorum.LearnerHandler.run())
+                    && call(* org.apache.zookeeper.server.quorum.LearnerHandler.syncFollower(long, LearnerMaster))
+                    && args(zxid, lm);
+
+    before(long zxid, LearnerMaster lm): learnerHandlerSyncFollower(zxid, lm) {
+        LOG.debug("------before learnerHandlerSyncFollower");
+        final long threadId = Thread.currentThread().getId();
+        final String threadName = Thread.currentThread().getName();
+        LOG.debug("before advice of learner handler-------Thread: {}, {}------", threadId, threadName);
+
+        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
+        int subnodeId = -1;
+        Integer lastMsgId = null;
+        try{
+            subnodeId = intercepter.getSubnodeId();
+            lastMsgId = intercepter.getLastMsgId();
+        } catch (RuntimeException e) {
+            LOG.debug("--------catch exception: {}", e.toString());
+            throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
+            return;
+        }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("LearnerHandler threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            return;
+        }
+
+        try {
+            // before offerMessage: increase sendingSubnodeNum
+            quorumPeerAspect.setSubnodeSending(intercepter);
+
+            final String receivingAddr = threadName.split("-")[1];
+
+            // Trick: actually this is a local event. We make it a message event to record the syncing follower
+            final int eventId = intercepter.getTestingService()
+                    .offerLocalEvent(subnodeId, SubnodeType.LEARNER_HANDLER, zxid, receivingAddr, MessageType.ACKEPOCH);
+            intercepter.setLastMsgId(eventId);
+            LOG.debug("learnerHandler about to sync. eventId = {}", eventId);
+
+            quorumPeerAspect.postSend(intercepter, subnodeId, eventId);
+
+            // Trick: set RECEIVING state here
+            intercepter.getTestingService().setReceivingState(subnodeId);
+
+            if (eventId == TestingDef.RetCode.BACK_TO_LOOKING) {
+                LOG.debug("LearnerHandler threadId: {}, event == -200, indicating the node is going to become looking", threadId);
+            }
+
+        } catch (RemoteException e) {
             LOG.debug("Encountered a remote exception", e);
             throw new RuntimeException(e);
         }
