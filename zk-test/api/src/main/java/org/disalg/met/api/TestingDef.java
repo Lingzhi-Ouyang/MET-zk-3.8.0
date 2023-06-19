@@ -11,6 +11,7 @@ public class TestingDef {
         int UNDEFINED = -10;
 
         int NOT_INTERCEPTED = -100;
+        int BACK_TO_LOOKING = -200;
         int EXIT = -400;
     }
 
