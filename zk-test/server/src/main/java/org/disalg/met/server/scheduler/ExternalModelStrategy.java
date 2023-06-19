@@ -250,7 +250,7 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                 searchLeaderMessage(action, sendingNodeId, processingNodeId, modelZxid, enabled);
                 break;
             case LeaderSyncFollower: // leader (learner handler) about to proceed after current epoch updated
-            case FollowerProcessNEWLEADERAfterCurrentEpochUpdated: // follower about to proceed after current epoch updated
+            case FollowerLogRequestWhenProcessingNEWLEADER: // follower about to proceed after current epoch updated
             case LeaderLog: // leader (learner handler) about to log
             case FollowerLog: // follower about to log
             case LeaderCommit: // leader (learner handler) about to commit
@@ -418,8 +418,8 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                         final int followerNodeId = testingService.getFollowerSocketAddressBook().indexOf(event.getPayload());
                         if (sendingNodeId != followerNodeId) continue;
                         break;
-                    case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
-                        LOG.debug("FollowerProcessNEWLEADERAfterCurrentEpochUpdated: {}, {}", subnodeType, type);
+                    case FollowerLogRequestWhenProcessingNEWLEADER:
+                        LOG.debug("FollowerLogRequestWhenProcessingNEWLEADER: {}, {}", subnodeType, type);
                         if (!subnodeType.equals(SubnodeType.QUORUM_PEER)
                                 || type != TestingDef.MessageType.NEWLEADER) continue;
                         break;
