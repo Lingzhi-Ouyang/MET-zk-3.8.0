@@ -1,7 +1,6 @@
 package org.disalg.met.server.predicate;
 
 import org.disalg.met.api.ModelAction;
-import org.disalg.met.api.NodeState;
 import org.disalg.met.api.configuration.SchedulerConfigurationException;
 import org.disalg.met.server.TestingService;
 import org.disalg.met.server.event.Event;
@@ -9,8 +8,6 @@ import org.disalg.met.server.event.LocalEvent;
 import org.disalg.met.server.scheduler.ExternalModelStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Set;
 
 public class TargetInternalEventReady implements WaitPredicate{
     private static final Logger LOG = LoggerFactory.getLogger(TargetInternalEventReady.class);
@@ -21,9 +18,9 @@ public class TargetInternalEventReady implements WaitPredicate{
 
     private final ModelAction modelAction;
 
-    private final Integer nodeId;
+    private final Integer processingNodeId;
 
-    private final Integer peerId;
+    private final Integer sendingNodeId;
 
     private Event event = null;
 
@@ -32,14 +29,14 @@ public class TargetInternalEventReady implements WaitPredicate{
     public TargetInternalEventReady(final TestingService testingService,
                                     ExternalModelStrategy strategy,
                                     ModelAction action,
-                                    Integer nodeId,
-                                    Integer peerId,
+                                    Integer processingNodeId,
+                                    Integer sendingNodeId,
                                     long modelZxid) {
         this.testingService = testingService;
         this.externalModelStrategy = strategy;
         this.modelAction = action;
-        this.nodeId = nodeId;
-        this.peerId = peerId;
+        this.processingNodeId = processingNodeId;
+        this.sendingNodeId = sendingNodeId;
         this.modelZxid = modelZxid;
     }
 
@@ -50,7 +47,7 @@ public class TargetInternalEventReady implements WaitPredicate{
     @Override
     public boolean isTrue() {
         try {
-            event = externalModelStrategy.getNextInternalEvent(modelAction, nodeId, peerId, modelZxid);
+            event = externalModelStrategy.getNextInternalEvent(modelAction, processingNodeId, sendingNodeId, modelZxid);
         } catch (SchedulerConfigurationException e) {
             LOG.debug("SchedulerConfigurationException found when scheduling {}!", modelAction);
             return false;
@@ -62,12 +59,12 @@ public class TargetInternalEventReady implements WaitPredicate{
     public String describe() {
         if (event instanceof LocalEvent) {
             return "target local event (action: " + modelAction +
-                    " node: " + nodeId +
+                    " node: " + processingNodeId +
                     " ready";
         } else {
             return "target message event (action: " + modelAction +
-                    " sendingNode: " + peerId +
-                    " receivingNode: " + nodeId +
+                    " sending node: " + sendingNodeId +
+                    ", receiving/processing node: " + processingNodeId +
                     " ready";
         }
     }
