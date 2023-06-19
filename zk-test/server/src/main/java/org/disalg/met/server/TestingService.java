@@ -566,6 +566,7 @@ public class TestingService implements TestingRemoteService {
                                     setDataClientId, nodeId, lastZxidInLeaderHistory, totalExecuted);
                             break;
                         case FollowerProcessPROPOSAL: // release PROPOSAL & release LOGGING
+                            // distinguish model versions
                             int proposalLeaderId = serverIdMap.get(elements.getString("peerId"));
                             long lastZxidInFollowerHistory = getLastZxidInNodeHistory(elements, serverName);
                             LOG.debug("FollowerProcessPROPOSAL modelZxid: {}", Long.toHexString(lastZxidInFollowerHistory));
@@ -574,12 +575,10 @@ public class TestingService implements TestingRemoteService {
                             break;
                         case FollowerSyncProcessorLogRequest:
                             long followerLastZxidInHistory = getLastZxidInNodeHistory(elements, serverName);
-                            LOG.debug("FollowerProcessPROPOSAL modelZxid: {}", Long.toHexString(followerLastZxidInHistory));
+                            LOG.debug("FollowerSyncProcessorLogRequest modelZxid: {}", Long.toHexString(followerLastZxidInHistory));
                             totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy, ModelAction.FollowerLog,
                                     nodeId, -1, followerLastZxidInHistory, totalExecuted, 3);
                             break;
-//                        case FollowerCommitProcessorCommit:
-//                            break;
                         // focus on last committed
                         case LeaderProcessACK: // release ACK && release learner handler's readRecord && release COMMIT
                             String followerNode = elements.getString("peerId");
@@ -591,13 +590,19 @@ public class TestingService implements TestingRemoteService {
                                     nodeId, ackFollowerId, followerLastLogged, totalExecuted);
                             break;
                         case FollowerProcessCOMMIT: // release COMMIT
+                            // distinguish model versions
                             int commitLeaderId = serverIdMap.get(elements.getString("peerId"));
                             long followerLastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
                             LOG.debug("FollowerProcessCOMMIT modelZxid: {}", Long.toHexString(followerLastCommitted));
-                            totalExecuted = scheduleFollowerProcessCOMMIT(externalModelStrategy,
+                            totalExecuted = scheduleFollowerProcessCOMMIT(externalModelStrategy, modelVersion,
                                     nodeId, commitLeaderId, followerLastCommitted, totalExecuted);
                             break;
-
+                        case FollowerCommitProcessorCommit:
+                            long lastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
+                            LOG.debug("FollowerCommitProcessorCommit modelZxid: {}", Long.toHexString(lastCommitted));
+                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy, ModelAction.FollowerCommit,
+                                    nodeId, -1, lastCommitted, totalExecuted, 3);
+                            break;
                         // TODO: focus on packets not committed during sync
                         case FollowerProcessPROPOSALInSync:
                             int proposalInSyncLeaderId = serverIdMap.get(elements.getString("peerId"));
@@ -647,15 +652,16 @@ public class TestingService implements TestingRemoteService {
                             totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
                                     modelAction, nodeId, syncLeaderId, modelZxid7, totalExecuted, retry);
                             break;
-                        case FollowerProcessNEWLEADER: // distinguish model versions
-                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
-                                    modelAction, nodeId, serverIdMap.get(elements.getString("peerId")),
-                                    -1L, totalExecuted, 10);
+                        case FollowerProcessNEWLEADER:
+                            // distinguish model versions
+                            totalExecuted = scheduleFollowerProcessNEWLEADER(externalModelStrategy, modelVersion,
+                                    nodeId, serverIdMap.get(elements.getString("peerId")),
+                                    -1L, totalExecuted);
                             break;
                         case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
                             LOG.debug("After FollowerUpdatedCurrentEpoch: {}", nodeId);
-                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
-                                    modelAction, nodeId, -1, -1, totalExecuted, 5);
+                            totalExecuted = scheduleFollowerProcessNEWLEADERAfterCurrentEpochUpdated(externalModelStrategy,
+                                    modelVersion, nodeId, -1, -1, totalExecuted);
                             break;
                         case SetInitState:
                             JSONArray initStateParticipants = elements.getJSONArray("peerId");
@@ -1321,7 +1327,7 @@ public class TestingService implements TestingRemoteService {
         }
         for (Integer peer: peers) {
             scheduleInternalEventWithWaitingRetry(strategy,
-                    ModelAction.FollowerProcessNEWLEADERAfterCurrentEpochUpdated, peer, -1, -1, totalExecuted, retry1);
+                    ModelAction.FollowerLogRequestWhenProcessingNEWLEADER, peer, -1, -1, totalExecuted, retry1);
         }
         for (Integer peer: peers) {
             scheduleFollowerACKandLeaderReadRecord(strategy,
@@ -1884,7 +1890,7 @@ public class TestingService implements TestingRemoteService {
         }
         for (int peer: participants) {
             if (peer == leaderId) continue;
-            scheduleFollowerProcessCOMMIT(strategy, peer, leaderId, -1, totalExecuted);
+            scheduleFollowerProcessCOMMIT(strategy, ModelVersion.DEFAULT, peer, leaderId, -1, totalExecuted);
         }
 
         // create key=/test if un-exists
@@ -1927,7 +1933,7 @@ public class TestingService implements TestingRemoteService {
             }
             for (int peer: participants) {
                 if (peer == leaderId) continue;
-                scheduleFollowerProcessCOMMIT(strategy, peer, leaderId, -1, totalExecuted);
+                scheduleFollowerProcessCOMMIT(strategy, ModelVersion.DEFAULT, peer, leaderId, -1, totalExecuted);
             }
 
             keySet.add(key);
@@ -2057,14 +2063,15 @@ public class TestingService implements TestingRemoteService {
                                                 final int leaderId,
                                                 final long modelZxid,
                                                 int totalExecuted) throws SchedulerConfigurationException {
+        LOG.debug("Model version: {}.", modelVersion);
         switch (modelVersion) {
             case DEFAULT:
             case zk_test_v3:
                 // In broadcast, leader release PROPOSAL successfully
                 // Or, follower just log request that received in SYNC
                 try {
-                    LOG.debug("Model version: {}. Try to schedule LeaderToFollowerProposal leaderId: {}",
-                            modelVersion, leaderId);
+                    LOG.debug("Try to schedule LeaderToFollowerProposal and FollowerLog. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
                     scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderToFollowerProposal,
                             followerId, leaderId, modelZxid, totalExecuted, 2);
                 } catch (SchedulerConfigurationException e2) {
@@ -2079,10 +2086,11 @@ public class TestingService implements TestingRemoteService {
                 }
                 break;
             case zk_test_v4:
+            case zk_test_v5:
                 // Do not need to match modelZxid in V4
                 try {
-                    LOG.debug("Model version: {}. Try to schedule LeaderToFollowerProposal leaderId: {}",
-                            modelVersion, leaderId);
+                    LOG.debug("Try to schedule LeaderToFollowerProposal. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
                     totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderToFollowerProposal,
                             followerId, leaderId, -1, totalExecuted, 2);
                 } catch (SchedulerConfigurationException e2) {
@@ -2090,6 +2098,8 @@ public class TestingService implements TestingRemoteService {
                             "Model version: {}. ", modelVersion);
                 }
                 break;
+            default:
+                throw new SchedulerConfigurationException();
         }
         return totalExecuted;
     }
@@ -2134,23 +2144,46 @@ public class TestingService implements TestingRemoteService {
     }
 
     private int scheduleFollowerProcessCOMMIT(ExternalModelStrategy strategy,
+                                              final ModelVersion modelVersion,
                                               final int followerId,
                                               final int leaderId,
                                               final long modelZxid,
                                               int totalExecuted) throws SchedulerConfigurationException {
-        // In broadcast, leader release COMMIT successfully
-        // Or,  follower just COMMIT in SYNC
-        try {
-            LOG.debug("try to schedule LeaderToFollowerCOMMIT leaderId: {}", leaderId);
-            scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderToFollowerCOMMIT,
-                    followerId, leaderId, modelZxid, totalExecuted, 1);
-        } catch (SchedulerConfigurationException e2) {
-            LOG.debug("SchedulerConfigurationException found when scheduling LeaderToFollowerCOMMIT! " +
-                    "Try to schedule follower's FollowerCommit. (This should usually occur in / just after SYNC)");
-        } finally {
-            // Step 2. follower log, and wait for follower's SYNC thread sending ACK steady
-            totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerCommit,
-                    followerId, -1, modelZxid, totalExecuted, 1);
+        LOG.debug("Model version: {}.", modelVersion);
+        switch (modelVersion) {
+            case DEFAULT:
+            case zk_test_v3:
+                // In broadcast, leader release COMMIT successfully
+                // Or, follower just COMMIT in SYNC
+                try {
+                    LOG.debug("Try to schedule LeaderToFollowerCOMMIT and FollowerCommit. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
+                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderToFollowerCOMMIT,
+                            followerId, leaderId, modelZxid, totalExecuted, 1);
+                } catch (SchedulerConfigurationException e2) {
+                    LOG.debug("SchedulerConfigurationException found when scheduling LeaderToFollowerCOMMIT! " +
+                            "Try to schedule follower's FollowerCommit. (This should usually occur in / just after SYNC)");
+                } finally {
+                    // Step 2. follower log, and wait for follower's SYNC thread sending ACK steady
+                    totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerCommit,
+                            followerId, -1, modelZxid, totalExecuted, 1);
+                }
+                break;
+            case zk_test_v4:
+            case zk_test_v5:
+                // Do not need to match modelZxid in V4
+                try {
+                    LOG.debug("Try to schedule LeaderToFollowerCOMMIT. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
+                    totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderToFollowerCOMMIT,
+                            followerId, leaderId, -1, totalExecuted, 2);
+                } catch (SchedulerConfigurationException e2) {
+                    LOG.debug("SchedulerConfigurationException found when scheduling LeaderToFollowerCOMMIT! " +
+                            "Model version: {}. ", modelVersion);
+                }
+                break;
+            default:
+                throw new SchedulerConfigurationException();
         }
         return totalExecuted;
     }
@@ -2182,6 +2215,64 @@ public class TestingService implements TestingRemoteService {
         return totalExecuted;
     }
 
+    private int scheduleFollowerProcessNEWLEADER(ExternalModelStrategy strategy,
+                                                  ModelVersion modelVersion,
+                                                  final int followerId,
+                                                  final int leaderId,
+                                                  final long modelZxid,
+                                                  int totalExecuted) throws SchedulerConfigurationException {
+        LOG.debug("Model version: {}.", modelVersion);
+        switch (modelVersion) {
+            case DEFAULT:
+            case zk_test_v3:
+                LOG.debug("Try to schedule FollowerProcessNEWLEADER. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerProcessNEWLEADER, followerId, leaderId, modelZxid, totalExecuted, 10);
+                break;
+            case zk_test_v4:
+            case zk_test_v5:
+                LOG.debug("Try to schedule FollowerProcessNEWLEADER and FollowerLogRequestWhenProcessingNEWLEADER. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerProcessNEWLEADER, followerId, leaderId, modelZxid, totalExecuted, 10);
+                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerLogRequestWhenProcessingNEWLEADER, followerId, -1, modelZxid, totalExecuted, 3);
+                break;
+            default:
+                throw new SchedulerConfigurationException();
+        }
+        return totalExecuted;
+
+    }
+
+    private int scheduleFollowerProcessNEWLEADERAfterCurrentEpochUpdated(ExternalModelStrategy strategy,
+                                                                         ModelVersion modelVersion,
+                                                                         final int followerId,
+                                                                         final int leaderId,
+                                                                         final long modelZxid,
+                                                                         int totalExecuted) throws SchedulerConfigurationException {
+        LOG.debug("Model version: {}.", modelVersion);
+        switch (modelVersion) {
+            case DEFAULT:
+            case zk_test_v3:
+                LOG.debug("Try to schedule FollowerLogRequestWhenProcessingNEWLEADER. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerLogRequestWhenProcessingNEWLEADER,
+                        followerId, leaderId, modelZxid, totalExecuted, 5);
+                break;
+            case zk_test_v5:
+                LOG.debug("Do not need to schedule any event!" +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                totalExecuted = scheduleDummyEvent(totalExecuted);
+                break;
+            case zk_test_v4:
+            default:
+                throw new SchedulerConfigurationException();
+        }
+        return totalExecuted;
+    }
 
     private int scheduleFollowerACKandLeaderReadRecord(ExternalModelStrategy strategy,
                                                        ModelAction modelAction,
@@ -2354,6 +2445,22 @@ public class TestingService implements TestingRemoteService {
         return totalExecuted;
     }
 
+    public int scheduleDummyEvent(int totalExecuted) {
+        try {
+            long startTime = System.currentTimeMillis();
+            Event event = new DummyEvent();
+            LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted + 1);
+            LOG.debug("prepare to execute event: {}", event);
+            if (event.execute()) {
+                ++totalExecuted;
+                recordProperties(totalExecuted, startTime, event);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return totalExecuted;
+    }
+
     public int scheduleInternalEventWithRetry(ExternalModelStrategy strategy,
                                               final ModelAction action,
                                               final int nodeId,
@@ -2418,8 +2525,6 @@ public class TestingService implements TestingRemoteService {
                         LOG.debug("target internal event not found! will wait with retry {} more time(s).", retry);
                         continue;
                     }
-//                    Event event = strategy.getNextInternalEvent(action, nodeId, peerId);
-//                    assert event != null;
                     LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted + 1);
                     LOG.debug("prepare to execute event: {}", event);
                     if (event.execute()) {
@@ -2432,13 +2537,6 @@ public class TestingService implements TestingRemoteService {
                 e.printStackTrace();
                 break;
             }
-//            catch (SchedulerConfigurationException e2) {
-//                LOG.debug("SchedulerConfigurationException found when scheduling {}! Retry: {}", action, retry);
-//                retry--;
-//                if (retry <= 0) {
-//                    throw e2;
-//                }
-//            }
         }
         if (retry <= 0) {
             LOG.debug("SchedulerConfigurationException found when scheduling {}! Retry: {}", action, retry);
