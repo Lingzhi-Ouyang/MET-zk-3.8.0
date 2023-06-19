@@ -17,6 +17,7 @@ public enum ModelAction {
 
     // sync
     FollowerProcessLEADERINFO,
+    LeaderProcessACKEPOCH,
     LeaderSyncFollower,
     FollowerProcessSyncMessage,
     FollowerProcessPROPOSALInSync,
