@@ -40,6 +40,7 @@ public class AliveNodesInLookingState implements WaitPredicate{
             // broadcast events should be released first
             // o.w. the node will be blocked and will not return to LOOKING state
             LOG.debug("Try to release intercepted broadcast event first before the node get into LOOKING...");
+            LOG.debug("Looking participants including : {}", participants);
             testingService.releaseBroadcastEvent(participants, true);
             for (Integer nodeId : participants) {
                 if (checkNodeNotLooking(nodeId)) return false;
@@ -57,12 +58,13 @@ public class AliveNodesInLookingState implements WaitPredicate{
                 LOG.debug("------Not steady-----Node {} status: {}\n", nodeId, nodeState);
                 return true;
             case ONLINE:
+            case UNREADY:
                 if (!LeaderElectionState.LOOKING.equals(leaderElectionState)) {
-                    LOG.debug("------Not steady-----Node {} leaderElectionState: {}\n",
-                            nodeId, leaderElectionState);
+                    LOG.debug("------Not steady-----Node {} status: {}, leaderElectionState: {}\n",
+                            nodeId, nodeState, leaderElectionState);
                     return true;
                 }
-                LOG.debug("-----------Node {} status: {}", nodeId, nodeState);
+                LOG.debug("-----------Node {} status: {}, leaderElectionState: {}\n", nodeId, nodeState, leaderElectionState);
                 break;
             case OFFLINE:
                 LOG.debug("-----------Node {} status: {}", nodeId, nodeState);
