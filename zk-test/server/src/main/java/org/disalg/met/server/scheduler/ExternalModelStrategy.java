@@ -214,7 +214,7 @@ public class ExternalModelStrategy implements SchedulingStrategy{
         LOG.debug("eventCount: {}, events: {}", events.size(), events);
     }
 
-    public Event getNextInternalEvent(ModelAction action, int nodeId, int peerId, long modelZxid) throws SchedulerConfigurationException {
+    public Event getNextInternalEvent(ModelAction action, int processingNodeId, int sendingNodeId, long modelZxid) throws SchedulerConfigurationException {
         // 1. get all enabled events
         final List<Event> enabled = new ArrayList<>();
         LOG.debug("prepareNextEvent: events.size: {}", events.size());
@@ -232,29 +232,30 @@ public class ExternalModelStrategy implements SchedulingStrategy{
         nextEvent = null;
         // 2. search specific pre-condition event that should be lied in the sender
         switch (action) {
-            case LeaderSyncFollower: // follower to release ACKEPOCH
-            case LeaderProcessACKLD: // follower to release ACKLD
-            case FollowerToLeaderACK: // follower to release ACK
-                searchFollowerMessage(action, peerId, nodeId, modelZxid, enabled);
+            case LeaderProcessACKEPOCH: // follower about to release ACKEPOCH
+            case LeaderProcessACKLD: // follower about to release ACKLD
+            case FollowerToLeaderACK: // follower about to release ACK
+                searchFollowerMessage(action, sendingNodeId, processingNodeId, modelZxid, enabled);
                 break;
-            case FollowerProcessLEADERINFO:
-            case FollowerProcessSyncMessage: // leader to release DIFF / TRUNC / SNAP
-            case FollowerProcessPROPOSALInSync: // leader to release PROPOSAL
-            case FollowerProcessCOMMITInSync: // leader to release COMMIT
-            case FollowerProcessNEWLEADER: // leader to release NEWLEADER
+            case FollowerProcessLEADERINFO: // leader (learner handler) about to release LEADERINFO
+            case FollowerProcessSyncMessage: // leader (learner handler) about to release DIFF / TRUNC / SNAP
+            case FollowerProcessPROPOSALInSync: // leader (learner handler) about to release PROPOSAL
+            case FollowerProcessCOMMITInSync: // leader (learner handler) about to release COMMIT
+            case FollowerProcessNEWLEADER: // leader (learner handler) about to release NEWLEADER
             case LearnerHandlerReadRecord:
-            case FollowerProcessUPTODATE: // leader to release UPTODATE
-            case LeaderToFollowerProposal: // leader to release PROPOSAL
-            case LeaderToFollowerCOMMIT: // leader to release COMMIT
-                LOG.debug("action:{}, peerId: {}, nodeId: {}, modelZxid: {} ", action, peerId, nodeId, modelZxid);
-                searchLeaderMessage(action, peerId, nodeId, modelZxid, enabled);
+            case FollowerProcessUPTODATE: // leader (learner handler) about to release UPTODATE
+            case LeaderToFollowerProposal: // leader (learner handler) about to release PROPOSAL
+            case LeaderToFollowerCOMMIT: // leader (learner handler) about to release COMMIT
+                LOG.debug("action:{}, processingNodeId: {}, sendingNodeId: {}, modelZxid: {} ", action, sendingNodeId, processingNodeId, modelZxid);
+                searchLeaderMessage(action, sendingNodeId, processingNodeId, modelZxid, enabled);
                 break;
-            case LeaderLog:
-            case FollowerLog:
-            case LeaderCommit:
-            case FollowerCommit:
-            case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
-                searchLocalMessage(action, nodeId, modelZxid, enabled);
+            case LeaderSyncFollower: // leader (learner handler) about to proceed after current epoch updated
+            case FollowerProcessNEWLEADERAfterCurrentEpochUpdated: // follower about to proceed after current epoch updated
+            case LeaderLog: // leader (learner handler) about to log
+            case FollowerLog: // follower about to log
+            case LeaderCommit: // leader (learner handler) about to commit
+            case FollowerCommit: // follower about to commit
+                searchLocalMessage(action, sendingNodeId, processingNodeId, modelZxid, enabled);
                 break;
         }
 
@@ -361,7 +362,7 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                 final int lastReadType = event.getType(); // Note: this describes leader's previous message type that this ACK replies to
                 switch (lastReadType) {
                     case MessageType.LEADERINFO:
-                        if (!action.equals(ModelAction.LeaderSyncFollower)) continue;
+                        if (!action.equals(ModelAction.LeaderProcessACKEPOCH)) continue;
                         break;
                     case MessageType.NEWLEADER:
                         if (!action.equals(ModelAction.LeaderProcessACKLD)) continue;
@@ -395,20 +396,33 @@ public class ExternalModelStrategy implements SchedulingStrategy{
     }
 
     public void searchLocalMessage(final ModelAction action,
-                                   final int nodeId,
+                                   final int sendingNodeId,
+                                   final int processingNodeId,
                                    final long modelZxid,
                                    List<Event> enabled) {
         for (final Event e : enabled) {
             if (e instanceof LocalEvent) {
                 final LocalEvent event = (LocalEvent) e;
                 final int eventNodeId = event.getNodeId();
-                if (eventNodeId != nodeId) continue;
+                if (eventNodeId != processingNodeId) continue;
                 final SubnodeType subnodeType = event.getSubnodeType();
                 final int type = event.getType();
                 switch (action) {
 //                    case LeaderWaitForEpochAck:
 //                        // TODO：ia.readRecord(ackEpochPacket, "packet");
 //                        break;
+                    case LeaderSyncFollower:
+                        LOG.debug("LeaderSyncFollower: {}, {}", subnodeType, type);
+                        if (!subnodeType.equals(SubnodeType.LEARNER_HANDLER)
+                                || type != TestingDef.MessageType.ACKEPOCH) continue;
+                        final int followerNodeId = testingService.getFollowerSocketAddressBook().indexOf(event.getPayload());
+                        if (sendingNodeId != followerNodeId) continue;
+                        break;
+                    case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
+                        LOG.debug("FollowerProcessNEWLEADERAfterCurrentEpochUpdated: {}, {}", subnodeType, type);
+                        if (!subnodeType.equals(SubnodeType.QUORUM_PEER)
+                                || type != TestingDef.MessageType.NEWLEADER) continue;
+                        break;
                     case LeaderLog:
                         final long eventZxid = event.getZxid();
                         if (!subnodeType.equals(SubnodeType.SYNC_PROCESSOR)) continue;
@@ -424,11 +438,6 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                             LOG.debug("modelZxid {} < 0 : no need to store modelZxid for conformance checking",
                                     Long.toHexString(modelZxid));
                         }
-                        break;
-                    case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
-                        LOG.debug("FollowerProcessNEWLEADERAfterCurrentEpochUpdated: {}, {}", subnodeType, type);
-                        if (!subnodeType.equals(SubnodeType.QUORUM_PEER)
-                                || type != TestingDef.MessageType.NEWLEADER) continue;
                         break;
                     case FollowerLog:
                         if (!subnodeType.equals(SubnodeType.SYNC_PROCESSOR)) continue;
