@@ -55,12 +55,37 @@ public class LocalEventExecutor extends BaseEventExecutor{
         // set the corresponding subnode to be PROCESSING
         subnode.setState(SubnodeState.PROCESSING);
 
-        if (event.getFlag() == TestingDef.RetCode.EXIT) {
+        if (event.getFlag() == TestingDef.RetCode.EXIT || event.getFlag() == TestingDef.RetCode.NO_WAIT) {
             return;
         }
 
         // set the next subnode to be PROCESSING
         switch (subnodeType) {
+            case LEARNER_HANDLER:
+                final int followerId = testingService.getFollowerSocketAddressBook().indexOf(event.getPayload());
+                LOG.debug("Leader {} about to sync with follower {}.", nodeId, followerId);
+                // Post-condition:
+                // for zk-3.5/6/7/8:
+                // - DIFF / TRUNC: let follower mapping to the leader's corresponding learnerHandlerSender
+                // - SNAP: the corresponding learnerHandlerSender will not be created here
+                testingService.getControlMonitor().notifyAll();
+                testingService.waitSyncTypeDetermined(followerId);
+                final int syncType = testingService.getSyncType(followerId);
+                LOG.info("Leader {} is going to sync with follower {} using {}", nodeId, followerId, syncType);
+
+                if ( syncType == MessageType.DIFF || syncType == MessageType.TRUNC ) {
+                    // Post-condition: let follower mapping to the leader's corresponding learnerHandlerSender
+                    testingService.getControlMonitor().notifyAll();
+                    testingService.waitFollowerMappingLearnerHandlerSender(followerId);
+                    // Post-condition for DIFF / TRUNC: let leader's corresponding learnerHandlerSender sending DIFF / TRUNC
+                    testingService.getControlMonitor().notifyAll();
+                    testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerSenderMap(followerId));
+                } else {
+                    // Post-condition for SNAP: let leader's corresponding learnerHandler sending SNAP
+                    testingService.getControlMonitor().notifyAll();
+                    testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
+                }
+                break;
             case QUORUM_PEER:
                 // follower: FollowerProcessSyncMessage / FollowerProcessPROPOSALInSync
                 //              / FollowerProcessCOMMITInSync / SubmitLoggingTaskInProcessingNEWLEADER
@@ -73,7 +98,7 @@ public class LocalEventExecutor extends BaseEventExecutor{
                         // 1. follower reply ACK-LD: FollowerSendACKtoNEWLEADER by follower's QUORUM_PEER
                         // 2. follower log a proposal: LogRequest by follower's SYNC_PROCESSOR
                         LOG.debug("Follower {} has updated CurrentEpoch during processing NEWLEADER.", nodeId);
-                        testingService.getControlMonitor().notifyAll();
+//                        testingService.getControlMonitor().notifyAll();
 //                        testingService.waitSubnodeTypeSending(nodeId, SubnodeType.QUORUM_PEER);
 //
 //                        // let leader's corresponding learnerHandler be intercepted at ReadRecord
