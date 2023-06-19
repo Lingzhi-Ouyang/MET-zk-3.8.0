@@ -46,6 +46,10 @@ public class LocalEvent extends AbstractEvent{
         return subnodeType;
     }
 
+    public String getPayload() {
+        return payload;
+    }
+
     public long getZxid() {
         return zxid;
     }
@@ -94,6 +98,8 @@ public class LocalEvent extends AbstractEvent{
                     action = "LeaderJudgingIsRunning";
                     break;
             }
+        } else if (subnodeType.equals(SubnodeType.LEARNER_HANDLER)) {
+            action = "LeaderSyncFollower";
         }
         return action +
                 "{id=" + getId() +
