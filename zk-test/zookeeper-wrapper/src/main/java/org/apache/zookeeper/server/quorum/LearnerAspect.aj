@@ -139,84 +139,63 @@ public aspect LearnerAspect {
             return;
         }
 
-//        if (quorumPeerAspect.isNewLeaderDone()) {
-        if (lastReadType == Leader.UPTODATE) {
-            // FollowerProcessUPTODATE
-            try {
+        try {
+            int lastReadMessageType = lastReadType;
+            if (lastReadType == Leader.UPTODATE) {
+                // FollowerProcessUPTODATE
                 if (quorumPeerAspect.isSyncFinished()) {
-                    lastReadType = MessageType.PROPOSAL_IN_SYNC;
+                    // for different fix code version
+                    lastReadMessageType = MessageType.PROPOSAL_IN_SYNC;
                     LOG.debug("-------!!!!-------reply ACK to PROPOSAL in SYNC");
                 } else {
                     LOG.debug("-------receiving UPTODATE!!!!-------begin to serve clients");
                 }
-
-                quorumPeerAspect.setSubnodeSending();
-                final long zxid = packet.getZxid();
-                final int followerWritePacketId = quorumPeerAspect.getTestingService().offerFollowerToLeaderMessage(quorumPeerSubnodeId, zxid, payload, lastReadType);
-
-                // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
-                quorumPeerAspect.postSend(quorumPeerSubnodeId, followerWritePacketId);
-
-                quorumPeerAspect.setSyncFinished(true);
-                quorumPeerAspect.getTestingService().readyForBroadcast(quorumPeerSubnodeId);
-
-                // Trick: set RECEIVING state here
-                quorumPeerAspect.getTestingService().setReceivingState(quorumPeerSubnodeId);
-
-                // to check if the partition happens
-                if (followerWritePacketId == TestingDef.RetCode.NODE_PAIR_IN_PARTITION){
-                    // just drop the message
-                    LOG.debug("partition occurs! just drop the message.");
-                    throw new InterruptedException();
-//                    return;
-                }
-
-                proceed(packet, flush);
-                return;
-            } catch (RemoteException | InterruptedException e) {
-                LOG.debug("Encountered a remote exception", e);
-                throw new RuntimeException(e);
-            }
-        } else if (lastReadType == Leader.NEWLEADER) {
-            // processing Leader.NEWLEADER
-            try {
+            } else if (lastReadType == Leader.NEWLEADER) {
+                // processing Leader.NEWLEADER
                 quorumPeerAspect.setSyncFinished(false);
                 if (quorumPeerAspect.isNewLeaderDone()) {
-                    lastReadType = MessageType.PROPOSAL_IN_SYNC;
+                    // for different fix code version
+                    lastReadMessageType = MessageType.PROPOSAL_IN_SYNC;
                     LOG.debug("-------!!!!-------reply ACK to PROPOSAL in SYNC");
                 } else {
                     LOG.debug("-------receiving NEWLEADER!!!!-------reply ACK");
                 }
                 quorumPeerAspect.setNewLeaderDone(true);
-                quorumPeerAspect.setSubnodeSending();
-                final long zxid = packet.getZxid();
-                final int followerWritePacketId = quorumPeerAspect.getTestingService().offerFollowerToLeaderMessage(quorumPeerSubnodeId, zxid, payload, lastReadType);
-
-                // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
-                quorumPeerAspect.postSend(quorumPeerSubnodeId, followerWritePacketId);
-
-                // Trick: set RECEIVING state here
-                quorumPeerAspect.getTestingService().setReceivingState(quorumPeerSubnodeId);
-
-                // to check if the partition happens
-                if (followerWritePacketId == TestingDef.RetCode.NODE_PAIR_IN_PARTITION){
-                    // just drop the message
-                    LOG.debug("partition occurs! just drop the message.");
-                    throw new InterruptedException();
-                }
-
+            } else {
+                LOG.debug("This event will not be intercepted when lastReadType = {}", lastReadType);
                 proceed(packet, flush);
                 return;
-            } catch (RemoteException | InterruptedException e) {
-                LOG.debug("Encountered a remote exception", e);
-                throw new RuntimeException(e);
             }
-        } else {
-            LOG.debug("lastReadType = {}", lastReadType);
+
+            quorumPeerAspect.setSubnodeSending();
+            final long zxid = packet.getZxid();
+            final int followerWritePacketId = quorumPeerAspect.getTestingService()
+                    .offerFollowerToLeaderMessage(quorumPeerSubnodeId, zxid, payload, lastReadMessageType);
+
+            // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
+            quorumPeerAspect.postSend(quorumPeerSubnodeId, followerWritePacketId);
+
+            if (lastReadType == Leader.UPTODATE) {
+                quorumPeerAspect.setSyncFinished(true);
+                quorumPeerAspect.getTestingService().readyForBroadcast(quorumPeerSubnodeId);
+            }
+
+            // Trick: set RECEIVING state here
+            quorumPeerAspect.getTestingService().setReceivingState(quorumPeerSubnodeId);
+
+            // to check if the partition happens
+            if (followerWritePacketId == TestingDef.RetCode.NODE_PAIR_IN_PARTITION){
+                // just drop the message
+                LOG.debug("partition occurs! just drop the message.");
+                throw new InterruptedException();
+            }
+
             proceed(packet, flush);
             return;
+        } catch (RemoteException | InterruptedException e) {
+            LOG.debug("Encountered a remote exception", e);
+            throw new RuntimeException(e);
         }
     }
-
 
 }

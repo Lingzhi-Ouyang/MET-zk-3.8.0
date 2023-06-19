@@ -81,13 +81,13 @@ public privileged aspect QuorumPeerAspect {
      * THis structure is for subnodes that are multiple of one type in a node.
      */
     public static class SubnodeIntercepter {
-        private String threadName;
+        final private String threadName;
 
-        private int subnodeId;
+        final private int subnodeId;
 
-        private SubnodeType subnodeType;
+        final private SubnodeType subnodeType;
 
-        private TestingRemoteService testingService;
+        final private TestingRemoteService testingService;
 
         private Integer lastMsgId = null;
 
@@ -126,6 +126,10 @@ public privileged aspect QuorumPeerAspect {
             this.lastMsgId = lastMsgId;
         }
 
+        public Integer getLastMsgId() {
+            return lastMsgId;
+        }
+
         public void setSending(boolean sending) {
             this.sending = sending;
         }
@@ -138,6 +142,17 @@ public privileged aspect QuorumPeerAspect {
             return syncFinished;
         }
 
+        @Override
+        public String toString() {
+            return "SubnodeIntercepter{" +
+                    "threadName='" + threadName + '\'' +
+                    ", subnodeId=" + subnodeId +
+                    ", subnodeType=" + subnodeType +
+                    ", lastMsgId=" + lastMsgId +
+                    ", sending=" + sending +
+                    ", syncFinished=" + syncFinished +
+                    '}';
+        }
     }
 
     public SubnodeIntercepter getIntercepter(long threadId) {
@@ -297,7 +312,7 @@ public privileged aspect QuorumPeerAspect {
             final String payload = constructPayload(toSend);
             lastSentMessageId = testingService.offerElectionMessage(quorumPeerSubnodeId,
                     (int) toSend.sid, toSend.electionEpoch, (int) toSend.leader, predecessorIds, payload);
-            LOG.debug("lastSentMessageId = {}", lastSentMessageId);
+            LOG.debug("after offerElectionMessage lastSentMessageId = {}, sendingSubnodeNum: {}", lastSentMessageId, sendingSubnodeNum.get());
             postSend(quorumPeerSubnodeId, lastSentMessageId);
 //            synchronized (nodeOnlineMonitor) {
 //                quorumPeerSending = false;
@@ -362,7 +377,7 @@ public privileged aspect QuorumPeerAspect {
     public void postSend(final int subnodeId, final int msgId) throws RemoteException {
         synchronized (nodeOnlineMonitor) {
             final int existingSendingSubnodeNum = sendingSubnodeNum.decrementAndGet();
-            LOG.debug("-----subnodeId: {}, decrease sendingSubnodeNum: {}", subnodeId, sendingSubnodeNum.get());
+            LOG.debug("-----subnodeId: {}, after decrease sendingSubnodeNum: {}", subnodeId, sendingSubnodeNum.get());
             if (msgId == TestingDef.RetCode.NODE_CRASH) {
                 // The last existing subnode is responsible to set the node state as offline
                 LOG.debug("-----subnodeId: {}, msgId: {}, existingSendingSubnodeNum: {}", subnodeId, msgId, existingSendingSubnodeNum);
@@ -380,11 +395,11 @@ public privileged aspect QuorumPeerAspect {
         synchronized (nodeOnlineMonitor) {
             sendingSubnodeNum.incrementAndGet();
             intercepter.sending = true;
-            LOG.debug("add sendingSubnodeNum: {}", sendingSubnodeNum.get());
+            LOG.debug("interceptor: {}, add sendingSubnodeNum: {}", intercepter.getSubnodeId(), sendingSubnodeNum.get());
         }
     }
 
-    // only for LEARNER_HANDLER_SENDER
+    // only for LEARNER_HANDLER & LEARNER_HANDLER_SENDER
     public void postSend(final SubnodeIntercepter intercepter, final int subnodeId, final int msgId) throws RemoteException {
         synchronized (nodeOnlineMonitor) {
             int existingSendingSubnodeNum = sendingSubnodeNum.get();
@@ -394,7 +409,7 @@ public privileged aspect QuorumPeerAspect {
             if (sendingSubnodeNum.get() > 0) {
                 existingSendingSubnodeNum = sendingSubnodeNum.decrementAndGet();
             }
-            LOG.debug("-----subnode {} Id: {}, decrease sendingSubnodeNum: {}",
+            LOG.debug("-----subnode {} Id: {}, after decrease sendingSubnodeNum: {}",
                     intercepter.subnodeType, subnodeId, sendingSubnodeNum.get());
             if (msgId == TestingDef.RetCode.NODE_CRASH) {
                 // The last existing subnode is responsible to set the node state as offline
@@ -598,8 +613,9 @@ public privileged aspect QuorumPeerAspect {
 
 
     /***
-     * for threads except QuorumPeer / WorkerReceiver / WorkerSender
+     * for threads whose subnodeType is unique in a process, e.g. SyncRequestProcessor & CommitProcessor
      */
+    @Deprecated
     public int registerSubnode(final TestingRemoteService testingService, final SubnodeType subnodeType) {
         try {
             LOG.debug("Found the remote testing service. Registering {} subnode", subnodeType);
@@ -615,6 +631,10 @@ public privileged aspect QuorumPeerAspect {
     public void deregisterSubnode(final TestingRemoteService testingService, final int subnodeId, final SubnodeType subnodeType) {
         try {
             LOG.debug("De-registering {} subnode {}", subnodeType, subnodeId);
+            if (subnodeId < 0) {
+                LOG.debug("{} subnodeId == {}", subnodeType, subnodeId);
+                return;
+            }
             testingService.deregisterSubnode(subnodeId);
             LOG.debug("Finish de-registering {} subnode {}", subnodeType, subnodeId);
         } catch (final RemoteException e) {
@@ -628,6 +648,9 @@ public privileged aspect QuorumPeerAspect {
      * The following registerSubnode() and deregisterSubnode() methods are for threads that will be run more than one
      * in a node such as LearnerHandler and LearnerHandlerSender
      * These subnode info will be stored using the SubnodeInterceptor structure
+     *
+     * Usage: SyncRequestProcessor & CommitProcessor & LearnerHandler & LearnerHandlerSender
+     *
      * @param threadId
      * @param threadName
      * @param subnodeType
@@ -656,8 +679,8 @@ public privileged aspect QuorumPeerAspect {
             final SubnodeType subnodeType = intercepter.getSubnodeType();
             final int subnodeId = intercepter.getSubnodeId();
             LOG.debug("De-registering {} subnode {}", subnodeType, subnodeId);
-            if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-                LOG.debug("{} subnodeId == -1, threadId: {}", subnodeType, threadId);
+            if (subnodeId < 0) {
+                LOG.debug("{} subnodeId == {}, threadId: {}", subnodeType, subnodeId, threadId);
                 return;
             }
             testingService.deregisterSubnode(subnodeId);

@@ -21,7 +21,6 @@ public aspect SyncRequestProcessorAspect {
 
     private int subnodeId;
 
-
     public TestingRemoteService getTestingService() {
         return testingService;
     }
@@ -30,11 +29,34 @@ public aspect SyncRequestProcessorAspect {
 
     pointcut runSyncProcessor(): execution(* SyncRequestProcessor.run());
 
+//    before(): runSyncProcessor() {
+//        testingService = quorumPeerAspect.createRmiConnection();
+//        LOG.debug("-------Thread: {}------", Thread.currentThread().getName());
+//        LOG.debug("before runSyncProcessor");
+//        subnodeId = quorumPeerAspect.registerSubnode(testingService, SubnodeType.SYNC_PROCESSOR);
+//        quorumPeerAspect.setSyncSubnodeId(subnodeId);
+//    }
+
     before(): runSyncProcessor() {
-        testingService = quorumPeerAspect.createRmiConnection();
-        LOG.debug("-------Thread: {}------", Thread.currentThread().getName());
-        LOG.debug("before runSyncProcessor");
-        subnodeId = quorumPeerAspect.registerSubnode(testingService, SubnodeType.SYNC_PROCESSOR);
+        final long threadId = Thread.currentThread().getId();
+        final String threadName = Thread.currentThread().getName();
+        LOG.debug("before runSyncProcessor-------Thread: {}, {}------", threadId, threadName);
+        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.registerSubnode(
+                Thread.currentThread().getId(), Thread.currentThread().getName(), SubnodeType.SYNC_PROCESSOR);
+        try{
+            subnodeId = intercepter.getSubnodeId();
+            testingService = intercepter.getTestingService();
+        } catch (RuntimeException e) {
+            LOG.debug("--------catch exception: {}", e.toString());
+            throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("before runSyncProcessor-------Thread: {}, subnodeId < 0: {}, " +
+                    "indicating the node is STOPPING or OFFLINE. " +
+                    "This subnode is not registered at the testing engine." +
+                    "------", threadId, subnodeId);
+            return;
+        }
         quorumPeerAspect.setSyncSubnodeId(subnodeId);
     }
 
@@ -69,20 +91,9 @@ public aspect SyncRequestProcessorAspect {
                     && target(queue);
 
     before(final BlockingQueue queue): takeOrPollFromQueue(queue) {
-        // TODO: Aspect of aspect
-        final long threadId = Thread.currentThread().getId();
-        final String threadName = Thread.currentThread().getName();
-//        LOG.debug("before advice of sync-------Thread: {}, {}------", threadId, threadName);
-
-////        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-//        LOG.debug("--------------My queuedRequests has {} element. syncProcessorSubnodeId: {}.",
-//                queue.size(), subnodeId);
         if (queue.isEmpty()) {
             // Going to block here. Better notify the scheduler
-//            LOG.debug("--------------Checked! My toSync queuedRequests has {} element. Go to RECEIVING state." +
-//                    " Will be blocked until some request enqueues when nothing to flush", queue.size());
             try {
-//                intercepter.getTestingService().setReceivingState(subnodeId);
                 testingService.setReceivingState(subnodeId);
             } catch (final RemoteException e) {
                 LOG.debug("Encountered a remote exception", e);
@@ -97,14 +108,34 @@ public aspect SyncRequestProcessorAspect {
         final String threadName = Thread.currentThread().getName();
         LOG.debug("after advice of sync-------Thread: {}, {}------", threadId, threadName);
 
-//        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
-
-//        LOG.debug("--------------My queuedRequests has {} element. syncProcessorSubnodeId: {}.",
-//                queue.size(), subnodeId);
-        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-            LOG.debug("SYNC threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
+        Integer lastMsgId = null;
+        try{
+            lastMsgId = intercepter.getLastMsgId();
+        } catch (RuntimeException e) {
+            LOG.debug("--------catch exception: {}", e.toString());
+            throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("Sync threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
             return;
         }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("Sync threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            return;
+        }
+
+//        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
+//            LOG.debug("SYNC threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+//            return;
+//        }
+//        if (subnodeId == TestingDef.RetCode.BACK_TO_LOOKING) {
+//            LOG.debug("SYNC threadId: {}, subnodeId == -200, indicating the node is going to become looking", threadId);
+//            return;
+//        }
 
         if (request == null){
             LOG.debug("------Using poll() just now and found no request! Flush now and using take()...");
@@ -123,8 +154,14 @@ public aspect SyncRequestProcessorAspect {
                 final int lastSyncRequestId =
                         testingService.offerLocalEvent(subnodeId, SubnodeType.SYNC_PROCESSOR, zxid, payload, type);
                 LOG.debug("lastSyncRequestId = {}", lastSyncRequestId);
+                intercepter.setLastMsgId(lastSyncRequestId);
                 // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
-                quorumPeerAspect.postSend(subnodeId, lastSyncRequestId);
+                quorumPeerAspect.postSend(intercepter, subnodeId, lastSyncRequestId);
+
+                if (lastSyncRequestId == TestingDef.RetCode.BACK_TO_LOOKING) {
+                    LOG.debug("Sync threadId: {}, event == -200, indicating the node is going to become looking", threadId);
+                }
+
             } catch (RemoteException e) {
                 e.printStackTrace();
             }

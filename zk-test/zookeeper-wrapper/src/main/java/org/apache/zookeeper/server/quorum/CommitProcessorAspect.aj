@@ -23,17 +23,45 @@ public privileged aspect CommitProcessorAspect {
 
     pointcut runCommitProcessor(): execution(* CommitProcessor.run());
 
+//    before(): runCommitProcessor() {
+//        LOG.debug("-------before runCommitProcessor. Thread {}: {}------",Thread.currentThread().getId(), Thread.currentThread().getName());
+//        testingService = quorumPeerAspect.createRmiConnection();
+//        subnodeId = quorumPeerAspect.registerSubnode(testingService, SubnodeType.COMMIT_PROCESSOR);
+//        try {
+//            testingService.setReceivingState(subnodeId);
+//        } catch (final RemoteException e) {
+//            LOG.debug("Encountered a remote exception", e);
+//            throw new RuntimeException(e);
+//        }
+//
+//    }
+
     before(): runCommitProcessor() {
-        LOG.debug("-------before runCommitProcessor. Thread {}: {}------",Thread.currentThread().getId(), Thread.currentThread().getName());
-        testingService = quorumPeerAspect.createRmiConnection();
-        subnodeId = quorumPeerAspect.registerSubnode(testingService, SubnodeType.COMMIT_PROCESSOR);
+        final long threadId = Thread.currentThread().getId();
+        final String threadName = Thread.currentThread().getName();
+        LOG.debug("before runCommitProcessor-------Thread: {}, {}------", threadId, threadName);
+        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.registerSubnode(
+                Thread.currentThread().getId(), Thread.currentThread().getName(), SubnodeType.COMMIT_PROCESSOR);
+        try{
+            subnodeId = intercepter.getSubnodeId();
+            testingService = intercepter.getTestingService();
+        } catch (RuntimeException e) {
+            LOG.debug("--------catch exception: {}", e.toString());
+            throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("before runCommitProcessor-------Thread: {}, subnodeId < 0: {}, " +
+                    "indicating the node is STOPPING or OFFLINE. " +
+                    "This subnode is not registered at the testing engine." +
+                    "------", threadId, subnodeId);
+            return;
+        }
         try {
             testingService.setReceivingState(subnodeId);
         } catch (final RemoteException e) {
             LOG.debug("Encountered a remote exception", e);
             throw new RuntimeException(e);
         }
-
     }
 
     after(): runCommitProcessor() {
@@ -109,10 +137,34 @@ public privileged aspect CommitProcessorAspect {
         LOG.debug("before advice of CommitProcessor.addToProcess()-------Thread: {}, {}------", threadId, threadName);
         LOG.debug("--------------Before processWrite in CommitProcessor {}: commitSubnode: {}",
                 request, subnodeId);
-        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
-            LOG.debug("COMMIT threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+
+        QuorumPeerAspect.SubnodeIntercepter intercepter = quorumPeerAspect.getIntercepter(threadId);
+        Integer lastMsgId = null;
+        try{
+            lastMsgId = intercepter.getLastMsgId();
+        } catch (RuntimeException e) {
+            LOG.debug("--------catch exception: {}", e.toString());
+            throw new RuntimeException(e);
+        }
+        if (subnodeId < 0) {
+            LOG.debug("CommitProcessor threadId: {}, subnodeId == {}, indicating the node is STOPPING or OFFLINE. " +
+                            "This subnode is not registered at the testing engine.",
+                    threadId, subnodeId);
             return;
         }
+        if (lastMsgId != null && lastMsgId.equals(TestingDef.RetCode.BACK_TO_LOOKING)) {
+            LOG.debug("CommitProcessor threadId: {}, subnodeId: {}, lastMsgId: {}," +
+                    " indicating the node is going to become looking", threadId, subnodeId, lastMsgId);
+            return;
+        }
+//        if (subnodeId == TestingDef.RetCode.NODE_CRASH) {
+//            LOG.debug("COMMIT threadId: {}, subnodeId == -1, indicating the node is STOPPING or OFFLINE", threadId);
+//            return;
+//        }
+//        if (subnodeId == TestingDef.RetCode.BACK_TO_LOOKING) {
+//            LOG.debug("COMMIT threadId: {}, subnodeId == -200, indicating the node is going to become looking", threadId);
+//            return;
+//        }
         final int type =  request.type;
         try {
             // before offerMessage: increase sendingSubnodeNum
@@ -121,11 +173,17 @@ public privileged aspect CommitProcessorAspect {
             final long zxid = request.zxid;
             final int lastCommitRequestId =
                     testingService.offerLocalEvent(subnodeId, SubnodeType.COMMIT_PROCESSOR, zxid, payload, type);
+            intercepter.setLastMsgId(lastCommitRequestId);
             LOG.debug("lastCommitRequestId = {}", lastCommitRequestId);
             // after offerMessage: decrease sendingSubnodeNum and shutdown this node if sendingSubnodeNum == 0
             quorumPeerAspect.postSend(subnodeId, lastCommitRequestId);
             // set RECEIVING state
             testingService.setReceivingState(subnodeId);
+
+            if (lastCommitRequestId == TestingDef.RetCode.BACK_TO_LOOKING) {
+                LOG.debug("Sync threadId: {}, event == -200, indicating the node is going to become looking", threadId);
+            }
+
         } catch (final RemoteException e) {
             LOG.debug("Encountered a remote exception", e);
             throw new RuntimeException(e);
