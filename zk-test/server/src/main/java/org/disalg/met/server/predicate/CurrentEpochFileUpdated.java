@@ -11,24 +11,24 @@ public class CurrentEpochFileUpdated implements WaitPredicate{
     private final TestingService testingService;
 
     private final int nodeId;
-    private final long lastCurrentEpoch;
+    private final long acceptedEpoch;
 
     public CurrentEpochFileUpdated(final TestingService testingService,
                                    final int nodeId,
-                                   final long lastCurrentEpoch) {
+                                   final long acceptedEpoch) {
         this.testingService = testingService;
         this.nodeId = nodeId;
-        this.lastCurrentEpoch = lastCurrentEpoch;
+        this.acceptedEpoch = acceptedEpoch;
     }
 
     @Override
     public boolean isTrue() {
-        return testingService.getCurrentEpoch(nodeId) > lastCurrentEpoch
+        return testingService.getCurrentEpoch(nodeId) == acceptedEpoch
                 || NodeState.STOPPING.equals(testingService.getNodeStates().get(nodeId));
     }
 
     @Override
     public String describe() {
-        return "currentEpoch file of " + nodeId + " updated";
+        return "currentEpoch file of node " + nodeId + " updated";
     }
 }
