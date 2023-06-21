@@ -19,7 +19,7 @@ public enum ModelAction {
     FollowerProcessLEADERINFO,
     LeaderProcessACKEPOCH,
     LeaderSyncFollower,
-    FollowerProcessSyncMessage,
+    FollowerProcessSyncMessage, FollowerProcessDIFF, FollowerProcessTRUNC, FollowerProcessSNAP,
     FollowerProcessPROPOSALInSync,
     FollowerProcessCOMMITInSync,
     FollowerProcessNEWLEADER, LearnerHandlerReadRecord,
