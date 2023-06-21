@@ -497,7 +497,7 @@ public class TestingService implements TestingRemoteService {
 
                     modelAction = ModelAction.valueOf(action);
                     switch (modelAction) {
-                        // external events
+                        // environmental failures
                         case NodeCrash:
                             totalExecuted = scheduleNodeCrash(nodeId, totalExecuted);
 
@@ -526,6 +526,7 @@ public class TestingService implements TestingRemoteService {
                             totalExecuted = schedulePartitionStop(nodeId, partitionRecoverPeerId, totalExecuted);
                             break;
 
+                        // Client requests. Write requests is modelled in Action: LeaderProcessRequest.
                         case ClientGetData:
                             int getDataClientId = elements.getInteger("clientId") != null ?
                                     elements.getInteger("clientId") : nodeId;
@@ -539,12 +540,24 @@ public class TestingService implements TestingRemoteService {
                             break;
 
                         // internal events
+                        case SetInitState:
+                            JSONArray initStateParticipants = elements.getJSONArray("peerId");
+                            List<Integer> initStateParticipantList = initStateParticipants.stream()
+                                    .map(p -> serverIdMap.get(p.toString())).collect(Collectors.toList());
+                            LOG.debug("SetInitState: election leader: {}, other participants: {}", nodeId, initStateParticipantList);
+                            totalExecuted = setInitState(externalModelStrategy, currentStep,
+                                    nodeId, initStateParticipantList, serverName, elements, totalExecuted);
+                            break;
                         case ElectionAndDiscovery:
                             JSONArray participants = elements.getJSONArray("peerId");
                             List<Integer> peers = participants.stream()
                                     .map(p -> serverIdMap.get(p.toString())).collect(Collectors.toList());
-                            // get leader's accepted epoch
-                            // long modelAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
+                            // get leader's accepted / new current epoch
+                            long leaderAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
+                            long leaderCurrentEpoch = elements.getJSONArray("coreParam").getLong(2);
+                            LOG.debug("leaderAcceptedEpoch: {}, leaderCurrentEpoch: {}",
+                                    leaderAcceptedEpoch, leaderCurrentEpoch);
+                            assert leaderAcceptedEpoch == leaderCurrentEpoch;
                             List<Integer> looking = null;
                             if (elements.getJSONArray("looking") != null) {
                                 looking = elements.getJSONArray("looking").stream()
@@ -553,57 +566,25 @@ public class TestingService implements TestingRemoteService {
                             LOG.debug("election leader: {}, other participants: {}, looking: {}",
                                     nodeId, peers, looking);
                             totalExecuted = scheduleElectionAndDiscovery(externalModelStrategy,
-                                    currentStep, nodeId, peers, looking, -1L, totalExecuted);
+                                    currentStep, nodeId, peers, looking, leaderCurrentEpoch, totalExecuted);
                             break;
 
-                        // focus on history
-                        case LeaderProcessRequest:  // release set data & release leader log
-                            int setDataClientId = elements.getInteger("clientId") != null ?
-                                    elements.getInteger("clientId") : nodeId;
-                            long lastZxidInLeaderHistory = getLastZxidInNodeHistory(elements, serverName);
-                            LOG.debug("LeaderProcessRequest modelZxid: {}", Long.toHexString(lastZxidInLeaderHistory));
-                            totalExecuted = scheduleLeaderProcessRequest(externalModelStrategy,
-                                    setDataClientId, nodeId, lastZxidInLeaderHistory, totalExecuted);
+                        // SYNC-phase actions
+                        case LeaderSyncFollower: // send DIFF / TRUNC / SNAP
+                            int syncFollowerId = serverIdMap.get(elements.getString("peerId"));
+                            LOG.debug("LeaderSyncFollower, {}, {}", nodeId, syncFollowerId);
+                            totalExecuted = scheduleLeaderSyncFollower(externalModelStrategy,
+                                    nodeId, syncFollowerId, -1L, totalExecuted);
                             break;
-                        case FollowerProcessPROPOSAL: // release PROPOSAL & release LOGGING
-                            // distinguish model versions
-                            int proposalLeaderId = serverIdMap.get(elements.getString("peerId"));
-                            long lastZxidInFollowerHistory = getLastZxidInNodeHistory(elements, serverName);
-                            LOG.debug("FollowerProcessPROPOSAL modelZxid: {}", Long.toHexString(lastZxidInFollowerHistory));
-                            totalExecuted = scheduleFollowerProcessPROPOSAL(externalModelStrategy, modelVersion,
-                                    nodeId, proposalLeaderId, lastZxidInFollowerHistory, totalExecuted);
+                        case FollowerProcessSyncMessage: // TODO: + sync type & msg.mzxid
+                            int syncLeaderId = serverIdMap.get(elements.getString("peerId"));
+                            long modelZxid7 = -1L;
+                            LOG.debug("{}, modelZxid: {}", action, Long.toHexString(modelZxid7));
+                            int retry = 10;
+                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
+                                    modelAction, nodeId, syncLeaderId, modelZxid7, totalExecuted, retry);
                             break;
-                        case FollowerSyncProcessorLogRequest:
-                            long followerLastZxidInHistory = getLastZxidInNodeHistory(elements, serverName);
-                            LOG.debug("FollowerSyncProcessorLogRequest modelZxid: {}", Long.toHexString(followerLastZxidInHistory));
-                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy, ModelAction.FollowerLog,
-                                    nodeId, -1, followerLastZxidInHistory, totalExecuted, 3);
-                            break;
-                        // focus on last committed
-                        case LeaderProcessACK: // release ACK && release learner handler's readRecord && release COMMIT
-                            String followerNode = elements.getString("peerId");
-                            int ackFollowerId = serverIdMap.get(followerNode);
-                            long followerLastLogged = getLastZxidInNodeHistory(elements, followerNode);
-                            LOG.debug("LeaderProcessACK modelZxid: {}, which is last logged by follower {}",
-                                    Long.toHexString(followerLastLogged), ackFollowerId);
-                            totalExecuted = scheduleLeaderProcessACK(externalModelStrategy,
-                                    nodeId, ackFollowerId, followerLastLogged, totalExecuted);
-                            break;
-                        case FollowerProcessCOMMIT: // release COMMIT
-                            // distinguish model versions
-                            int commitLeaderId = serverIdMap.get(elements.getString("peerId"));
-                            long followerLastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
-                            LOG.debug("FollowerProcessCOMMIT modelZxid: {}", Long.toHexString(followerLastCommitted));
-                            totalExecuted = scheduleFollowerProcessCOMMIT(externalModelStrategy, modelVersion,
-                                    nodeId, commitLeaderId, followerLastCommitted, totalExecuted);
-                            break;
-                        case FollowerCommitProcessorCommit:
-                            long lastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
-                            LOG.debug("FollowerCommitProcessorCommit modelZxid: {}", Long.toHexString(lastCommitted));
-                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy, ModelAction.FollowerCommit,
-                                    nodeId, -1, lastCommitted, totalExecuted, 3);
-                            break;
-                        // TODO: focus on packets not committed during sync
+                        // TODO: focus on packets not committed during sync. + msg.mzxid
                         case FollowerProcessPROPOSALInSync:
                             int proposalInSyncLeaderId = serverIdMap.get(elements.getString("peerId"));
 //                            long firstNotCommitted = getLastNotCommittedInNodePacketsSync(elements, serverName);
@@ -612,8 +593,7 @@ public class TestingService implements TestingRemoteService {
                             totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
                                     modelAction, nodeId, proposalInSyncLeaderId, firstNotCommitted, totalExecuted, 5);
                             break;
-
-                        // TODO: focus on packets committed during sync
+                        // TODO: focus on packets committed during sync. + msg.mzxid
                         case FollowerProcessCOMMITInSync:
                             int commitInSyncLeaderId = serverIdMap.get(elements.getString("peerId"));
 //                            long firstCommitted = getLastCommittedInNodePacketsSync(elements, serverName);
@@ -622,13 +602,16 @@ public class TestingService implements TestingRemoteService {
                             totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
                                     modelAction, nodeId, commitInSyncLeaderId, firstCommitted, totalExecuted, 5);
                             break;
-
-                        // others
-                        case LeaderSyncFollower: // send DIFF / TRUNC / SNAP
-                            int syncFollowerId = serverIdMap.get(elements.getString("peerId"));
-                            LOG.debug("LeaderSyncFollower, {}, {}", nodeId, syncFollowerId);
-                            totalExecuted = scheduleLeaderSyncFollower(externalModelStrategy,
-                                    nodeId, syncFollowerId, -1L, totalExecuted);
+                        case FollowerProcessNEWLEADER:
+                            // distinguish model versions
+                            totalExecuted = scheduleFollowerProcessNEWLEADER(externalModelStrategy, modelVersion,
+                                    nodeId, serverIdMap.get(elements.getString("peerId")),
+                                    -1L, totalExecuted);
+                            break;
+                        case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
+                            LOG.debug("After FollowerUpdatedCurrentEpoch: {}", nodeId);
+                            totalExecuted = scheduleFollowerProcessNEWLEADERAfterCurrentEpochUpdated(externalModelStrategy,
+                                    modelVersion, nodeId, -1, -1, totalExecuted);
                             break;
                         case LeaderProcessACKLD: // release ACK && release learner handler's readRecord
                             int ackldFollowerId = serverIdMap.get(elements.getString("peerId"));
@@ -644,33 +627,57 @@ public class TestingService implements TestingRemoteService {
                             totalExecuted = scheduleLeaderProcessACK(externalModelStrategy,
                                     uptodateLeaderId, nodeId, -1L, totalExecuted);
                             break;
-                        case FollowerProcessSyncMessage:
-                            int syncLeaderId = serverIdMap.get(elements.getString("peerId"));
-                            long modelZxid7 = -1L;
-                            LOG.debug("{}, modelZxid: {}", action, Long.toHexString(modelZxid7));
-                            int retry = 10;
-                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy,
-                                    modelAction, nodeId, syncLeaderId, modelZxid7, totalExecuted, retry);
+
+                        // BROADCAST-phase actions
+                        case LeaderProcessRequest:  // TODO: + msg.mzxid
+                            // release set data & release leader log
+                            int setDataClientId = elements.getInteger("clientId") != null ?
+                                    elements.getInteger("clientId") : nodeId;
+                            long lastZxidInLeaderHistory = getLastZxidInNodeHistory(elements, serverName);
+                            LOG.debug("LeaderProcessRequest modelZxid: {}", Long.toHexString(lastZxidInLeaderHistory));
+                            totalExecuted = scheduleLeaderProcessRequest(externalModelStrategy,
+                                    setDataClientId, nodeId, lastZxidInLeaderHistory, totalExecuted);
                             break;
-                        case FollowerProcessNEWLEADER:
+                        case FollowerProcessPROPOSAL: // TODO: + msg.mzxid
                             // distinguish model versions
-                            totalExecuted = scheduleFollowerProcessNEWLEADER(externalModelStrategy, modelVersion,
-                                    nodeId, serverIdMap.get(elements.getString("peerId")),
-                                    -1L, totalExecuted);
+                            int proposalLeaderId = serverIdMap.get(elements.getString("peerId"));
+                            long lastZxidInFollowerHistory = getLastZxidInNodeHistory(elements, serverName);
+                            LOG.debug("FollowerProcessPROPOSAL modelZxid: {}", Long.toHexString(lastZxidInFollowerHistory));
+                            totalExecuted = scheduleFollowerProcessPROPOSAL(externalModelStrategy, modelVersion,
+                                    nodeId, proposalLeaderId, lastZxidInFollowerHistory, totalExecuted);
                             break;
-                        case FollowerProcessNEWLEADERAfterCurrentEpochUpdated:
-                            LOG.debug("After FollowerUpdatedCurrentEpoch: {}", nodeId);
-                            totalExecuted = scheduleFollowerProcessNEWLEADERAfterCurrentEpochUpdated(externalModelStrategy,
-                                    modelVersion, nodeId, -1, -1, totalExecuted);
+                        case FollowerSyncProcessorLogRequest: // TODO: + msg.mzxid
+                            long followerLastZxidInHistory = getLastZxidInNodeHistory(elements, serverName);
+                            LOG.debug("FollowerSyncProcessorLogRequest modelZxid: {}", Long.toHexString(followerLastZxidInHistory));
+                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy, ModelAction.FollowerLog,
+                                    nodeId, -1, followerLastZxidInHistory, totalExecuted, 3);
                             break;
-                        case SetInitState:
-                            JSONArray initStateParticipants = elements.getJSONArray("peerId");
-                            List<Integer> initStateParticipantList = initStateParticipants.stream()
-                                    .map(p -> serverIdMap.get(p.toString())).collect(Collectors.toList());
-                            LOG.debug("SetInitState: election leader: {}, other participants: {}", nodeId, initStateParticipantList);
-                            totalExecuted = setInitState(externalModelStrategy, currentStep,
-                                    nodeId, initStateParticipantList, serverName, elements, totalExecuted);
+                        case LeaderProcessACK: // TODO: + msg.mzxid
+                            // release ACK && release learner handler's readRecord && release COMMIT
+                            String followerNode = elements.getString("peerId");
+                            int ackFollowerId = serverIdMap.get(followerNode);
+                            long followerLastLogged = getLastZxidInNodeHistory(elements, followerNode);
+                            LOG.debug("LeaderProcessACK modelZxid: {}, which is last logged by follower {}",
+                                    Long.toHexString(followerLastLogged), ackFollowerId);
+                            totalExecuted = scheduleLeaderProcessACK(externalModelStrategy,
+                                    nodeId, ackFollowerId, followerLastLogged, totalExecuted);
                             break;
+                        case FollowerProcessCOMMIT: // TODO: + msg.mzxid
+                            // release COMMIT
+                            // distinguish model versions
+                            int commitLeaderId = serverIdMap.get(elements.getString("peerId"));
+                            long followerLastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
+                            LOG.debug("FollowerProcessCOMMIT modelZxid: {}", Long.toHexString(followerLastCommitted));
+                            totalExecuted = scheduleFollowerProcessCOMMIT(externalModelStrategy, modelVersion,
+                                    nodeId, commitLeaderId, followerLastCommitted, totalExecuted);
+                            break;
+                        case FollowerCommitProcessorCommit: // TODO: + msg.mzxid
+                            long lastCommitted = getLastZxidInNodeLastCommitted(elements, serverName);
+                            LOG.debug("FollowerCommitProcessorCommit modelZxid: {}", Long.toHexString(lastCommitted));
+                            totalExecuted = scheduleInternalEventWithWaitingRetry(externalModelStrategy, ModelAction.FollowerCommit,
+                                    nodeId, -1, lastCommitted, totalExecuted, 3);
+                            break;
+
                         default:
                             LOG.debug("No matching event for model action {}", modelAction);
                             throw new SchedulerConfigurationException();
@@ -943,11 +950,14 @@ public class TestingService implements TestingRemoteService {
 
     }
 
+    public static long makeZxid(long epoch, long counter) {
+        return (epoch << 32L) | (counter & 0xffffffffL);
+    }
 
     private long getModelZxidFromArrayForm(final JSONArray modelZxidArrayForm) {
         long epoch = modelZxidArrayForm.getLong(0) ;
         long counter = modelZxidArrayForm.getLong(1) ;
-        return (epoch << 32L) | (counter & 0xffffffffL);
+        return makeZxid(epoch, counter);
     }
     /***
      * For action : LeaderProcessRequest & FollowerProcessPROPOSAL & LeaderProcessACK
@@ -1307,7 +1317,7 @@ public class TestingService implements TestingRemoteService {
 //        long modelAcceptedEpoch = getModelAcceptedEpoch(elements, serverName);
         LOG.debug("election leader: {}, other participants: {}",
                 leaderId, peers);
-        scheduleElectionAndDiscovery(strategy, currentStep, leaderId, peers, null, -1L, totalExecuted);
+        scheduleElectionAndDiscovery(strategy, currentStep, leaderId, peers, null, 1L, totalExecuted);
 
         long modelZxid = -1L;
         int retry1 = 3;
@@ -1445,7 +1455,7 @@ public class TestingService implements TestingRemoteService {
                                             final Integer leaderId,
                                             List<Integer> peers,
                                             List<Integer> looking,
-                                            final Long modelAcceptedEpoch,
+                                            final Long leaderCurrentEpoch,
                                             int totalExecuted) throws SchedulerConfigurationException {
         try{
             Set<Integer> allParticipants = new HashSet<>(peers);
@@ -1580,7 +1590,8 @@ public class TestingService implements TestingRemoteService {
             for (int peer: peers) {
                 if (lookingParticipants.contains(peer)) {
                     LOG.debug("About to schedule LeaderSendLEADERINFO to a new follower! leader: {}, follower: {}", leaderId, peer);
-                    scheduleInternalEvent(strategy, ModelAction.FollowerProcessLEADERINFO, peer, leaderId, -1L, totalExecuted - 1);
+                    scheduleInternalEvent(strategy, ModelAction.FollowerProcessLEADERINFO, peer, leaderId,
+                            makeZxid(leaderCurrentEpoch, 0), totalExecuted - 1);
                 }
             }
 
@@ -3540,8 +3551,8 @@ public class TestingService implements TestingRemoteService {
                 waitFollowerSocketAddrRegistered(receivingAddr);
             }
             receivingNodeId = followerSocketAddressBook.indexOf(receivingAddr);
-            LOG.debug("Leader {} offerLeaderToFollowerMessage. type: {}. receivingNodeId: {}, {}",
-                    sendingNodeId, type, receivingNodeId, receivingAddr);
+            LOG.debug("Leader {} offerLeaderToFollowerMessage to receivingNodeId: {}, {} type: {}, zxid: 0x{}.",
+                    sendingNodeId, receivingNodeId, receivingAddr, type, Long.toHexString(zxid));
             if (receivingNodeId == -1) {
                 LOG.debug("The receiving node has crashed / un-exist!");
                 return TestingDef.RetCode.NODE_PAIR_IN_PARTITION;
@@ -4409,31 +4420,33 @@ public class TestingService implements TestingRemoteService {
             try {
                 // Update allZxidRecords
                 List<Long> zxidRecord = allZxidRecords.get(nodeId);
-                LOG.debug("Node " + nodeId + "'s original record: {}", zxidRecord);
+                LOG.debug("Node " + nodeId + "'s original record: {}", zxidRecord
+                        .stream().map(p -> "0x" + Long.toHexString(p)).collect(Collectors.toList()));
                 int len = zxidRecord.size();
                 if (zxidRecord.get(len - 1) < lastProcessedZxid
                         && (lastProcessedZxid & 0xffffffffL) != 0L  ){
                     zxidRecord.add(lastProcessedZxid);
 //                allZxidRecords.get(nodeId).add(lastProcessedZxid);
                     executionWriter.write(
-                            "\n---just update Node " + nodeId + "'s last record: " + allZxidRecords.get(nodeId));
+                            "\n---Update Node " + nodeId + "'s last record: " + allZxidRecords.get(nodeId)
+                                    .stream().map(p -> "0x" + Long.toHexString(p)).collect(Collectors.toList()));
 
                     // Update lastCommittedZxid by leader since in the test leader is always the first to update lastCommittedZxid
                     if (NodeState.ONLINE.equals(nodeStates.get(nodeId))
                             && LeaderElectionState.LEADING.equals(leaderElectionStates.get(nodeId))
                             && Phase.BROADCAST.equals(nodePhases.get(nodeId))) {
                         lastCommittedZxid.add(lastProcessedZxid);
-                        executionWriter.write("\n---Update lastCommittedZxid " + lastCommittedZxid);
+                        executionWriter.write("\n---Update lastCommittedZxid " + lastCommittedZxid.stream()
+                                .map(p -> "0x" + Long.toHexString(p)).collect(Collectors.toList()));
                     }
                 }
 
                 executionWriter.write(
                         "\n---Update Node " + nodeId + "'s lastProcessedZxid: 0x" + Long.toHexString(lastProcessedZxid));
-//                for (int i = 0; i < schedulerConfiguration.getNumNodes(); i++) {
-//                    executionWriter.write(" # " + Long.toHexString(lastProcessedZxids.get(i)));
-//                }
                 executionWriter.write(
-                        "\n---Node " + nodeId + "'s last record: " + allZxidRecords);
+                        "\n---All node's last record: " + allZxidRecords.stream()
+                                .map(l -> l.stream().map(p -> "0x" + Long.toHexString(p)).collect(Collectors.toList()))
+                                .collect(Collectors.toList()));
                 executionWriter.write("\n");
                 controlMonitor.notifyAll();
             } catch (final IOException e) {
@@ -4486,17 +4499,14 @@ public class TestingService implements TestingRemoteService {
         executionWriter.write("\n---Step: " + step + "--->");
         executionWriter.write(event.toString());
         executionWriter.write("\nlastProcessedZxid: 0x");
-        // Property verification
         for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
             executionWriter.write(Long.toHexString(lastProcessedZxids.get(nodeId)) + " # ");
         }
         executionWriter.write("\ncurrentEpoch: 0x");
-        // Property verification
         for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
             executionWriter.write(Long.toHexString(currentEpochs.get(nodeId)) + " # ");
         }
         executionWriter.write("\nacceptedEpoch: 0x");
-        // Property verification
         for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
             executionWriter.write(Long.toHexString(acceptedEpochs.get(nodeId)) + " # ");
         }

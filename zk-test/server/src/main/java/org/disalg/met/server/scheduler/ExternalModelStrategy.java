@@ -286,6 +286,10 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                 switch (type) {
                     case MessageType.LEADERINFO:
                         if (!action.equals(ModelAction.FollowerProcessLEADERINFO)) continue;
+                        if (modelZxid != event.getZxid()) {
+                            LOG.warn("LEADERINFO message: model zxid: {} != event zxid : {}", modelZxid, event.getZxid());
+                            continue;
+                        }
                         break;
                     case MessageType.DIFF:
                     case MessageType.TRUNC:
