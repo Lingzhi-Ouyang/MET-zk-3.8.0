@@ -365,10 +365,12 @@ public class ExternalModelStrategy implements SchedulingStrategy{
                         break;
                     case MessageType.UPTODATE:
                         if (!action.equals(ModelAction.FollowerToLeaderACK)) continue;
+                        if (modelZxid != 0L) continue;
                         break;
                     case MessageType.PROPOSAL: // as for ACK to PROPOSAL during SYNC, we regard it as a local event
                     case MessageType.PROPOSAL_IN_SYNC:
                         if (!action.equals(ModelAction.FollowerToLeaderACK) ) continue;
+                        if (modelZxid == 0L) continue;
                         if (!checkZxidConformance(modelZxid, event.getZxid())) continue;
                         break;
                     default:
