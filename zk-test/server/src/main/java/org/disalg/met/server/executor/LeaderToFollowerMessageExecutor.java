@@ -117,17 +117,11 @@ public class LeaderToFollowerMessageExecutor extends BaseEventExecutor {
                     testingService.waitSubnodeInSendingState(testingService.getFollowerLearnerHandlerMap(followerId));
                     break;
                 case MessageType.NEWLEADER: // releasing my NEWLEADER
-                    // wait for follower's ack to be sent.
-                    // Before this done, follower's currentEpoch file is updated
-
                     // --------------UPDATE 22/12-------------
                     // Updated 22/12: add an interceptor point after updating currentEpoch file
                     // Post-condition: SubmitLoggingTaskInProcessingNEWLEADER by the follower's QUORUM_PEER
                     testingService.getControlMonitor().notifyAll();
-//                    testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
-
-                    // LOG.info("IF NOT intercepting update currentEpoch: " +
-                    //       "leader releases NEWLEADER and follower will reply ACK: {}", event);
+                    testingService.waitSubnodeTypeSending(followerId, SubnodeType.QUORUM_PEER);
 
 //                    // let leader's corresponding learnerHandler be intercepted at ReadRecord
 //                    // Note: sendingSubnodeId is the learnerHandlerSender, not learnerHandler
