@@ -430,6 +430,10 @@ public aspect LearnerHandlerAspect {
         }
     }
 
+    /**
+     * For LearnerHandler starting sync with its corresponding follower at the beginning of SYNC.
+     * Note: un-exist in zk-3.4
+     */
     pointcut learnerHandlerSyncFollower(long zxid, LearnerMaster lm):
             withincode(* org.apache.zookeeper.server.quorum.LearnerHandler.run())
                     && call(* org.apache.zookeeper.server.quorum.LearnerHandler.syncFollower(long, LearnerMaster))
