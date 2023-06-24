@@ -630,7 +630,7 @@ public class TestingService implements TestingRemoteService {
                         case LeaderProcessACKLD: // release ACK && release learner handler's readRecord
                             int ackldFollowerId = serverIdMap.get(elements.getString("peerId"));
                             LOG.debug("{}, modelZxid: {}", action, -1L);
-                            totalExecuted = scheduleFollowerACKandLeaderReadRecord(externalModelStrategy,
+                            totalExecuted = scheduleLeaderProcessACKLD(externalModelStrategy,
                                     modelAction, nodeId, ackldFollowerId, -1L, totalExecuted);
                             break;
                         case FollowerProcessUPTODATE: // release UPTODATE
@@ -1383,7 +1383,7 @@ public class TestingService implements TestingRemoteService {
                     ModelVersion.DEFAULT, peer, -1, -1, totalExecuted);
         }
         for (Integer peer: peers) {
-            scheduleFollowerACKandLeaderReadRecord(strategy,
+            scheduleLeaderProcessACKLD(strategy,
                     ModelAction.LeaderProcessACKLD, leaderId, peer, modelZxid, totalExecuted);
         }
         for (Integer peer: peers) {
@@ -1482,6 +1482,61 @@ public class TestingService implements TestingRemoteService {
 
         return maxElectionEpochInLeader;
     }
+
+    /***
+     * The schedule process of leader election
+     * Pre-condition: all nodes steady
+     * Post-condition: all nodes voted & all nodes steady before request
+     * Property check: one leader has been elected
+     * @param leaderId the leader that model specifies
+     * @param totalExecuted the number of previous executed events
+     * @return the number of executed events
+     */
+    public int scheduleElection(final Integer currentStep, final String line, Integer leaderId, int totalExecuted) {
+        try{
+//            statistics.startTimer();
+            synchronized (controlMonitor) {
+                // pre-condition
+//                waitAllNodesSteady();
+                waitAliveNodesInLookingState();
+                while (schedulingStrategy.hasNextEvent() && totalExecuted < 100) {
+                    long begintime = System.currentTimeMillis();
+                    LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted + 1);
+                    final Event event = schedulingStrategy.nextEvent();
+                    if (event instanceof LeaderToFollowerMessageEvent) {
+                        final int sendingSubnodeId = ((LeaderToFollowerMessageEvent) event).getSendingSubnodeId();
+                        // confirm this works / use partition / let
+                        deregisterSubnode(sendingSubnodeId);
+                        ((LeaderToFollowerMessageEvent) event).setExecuted();
+                        LOG.debug("----Do not let the previous learner handler message occur here! So pass this event---------\n\n\n");
+                        continue;
+                    }
+                    if (event.execute()) {
+                        ++totalExecuted;
+                        recordProperties(totalExecuted, begintime, event);
+                    }
+                }
+                // pre-condition for election property check
+                waitAllNodesVoted();
+//                waitAllNodesSteadyBeforeRequest();
+            }
+            statistics.endTimer();
+            // check election results
+            leaderElectionVerifier.setModelResult(leaderId);
+            leaderElectionVerifier.verify();
+            // report statistics
+            if (currentStep != null && line != null) {
+                statistics.reportCurrentStep("[LINE " + currentStep + "]-" + line);
+            }
+            statistics.reportTotalExecutedEvents(totalExecuted);
+            statisticsWriter.write(statistics.toString() + "\n\n");
+            LOG.info(statistics.toString() + "\n\n\n\n\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return totalExecuted;
+    }
+
 
     /***
      * The schedule process of election and discovery
@@ -1672,190 +1727,189 @@ public class TestingService implements TestingRemoteService {
         return totalExecuted;
     }
 
+    private int scheduleLeaderSyncFollower(ExternalModelStrategy strategy,
+                                           final int leaderId,
+                                           final int followerId,
+                                           final long modelEpoch,
+                                           int totalExecuted) throws SchedulerConfigurationException {
+        // step 1. release leader's SyncFollower
+        try {
+            LOG.debug("try to schedule LeaderSyncFollower. follower: {}", followerId);
+            totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderSyncFollower,
+                    leaderId, followerId, modelEpoch, totalExecuted, 1);
+        } catch (SchedulerConfigurationException e2) {
+            LOG.debug("SchedulerConfigurationException found when scheduling FollowerSendACKEPOCH! " +
+                    "Try to schedule FollowerSendACKEPOCH. (This should usually occur in Discovery)");
+            throw new SchedulerConfigurationException();
+        }
+//        // Step 2. release leader's waitForEpochACK
+//        try {
+//            LOG.debug("try to schedule LeaderWaitForEpochAck leader: {}", leaderId);
+//            totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderWaitForEpochAck,
+//                    leaderId, -1, modelEpoch, totalExecuted, 1);
+//        } catch (SchedulerConfigurationException e2) {
+//            LOG.debug("SchedulerConfigurationException found when scheduling LeaderWaitForEpochAck! " +
+//                    "Try to schedule LeaderWaitForEpochAck. (This should usually occur in Discovery)");
+//        }
+        return totalExecuted;
+    }
 
-    /***
-     * The schedule process of leader election
-     * Pre-condition: all nodes steady
-     * Post-condition: all nodes voted & all nodes steady before request
-     * Property check: one leader has been elected
-     * @param leaderId the leader that model specifies
-     * @param totalExecuted the number of previous executed events
-     * @return the number of executed events
-     */
-    public int scheduleElection(final Integer currentStep, final String line, Integer leaderId, int totalExecuted) {
-        try{
-//            statistics.startTimer();
-            synchronized (controlMonitor) {
-                // pre-condition
-//                waitAllNodesSteady();
-                waitAliveNodesInLookingState();
-                while (schedulingStrategy.hasNextEvent() && totalExecuted < 100) {
-                    long begintime = System.currentTimeMillis();
-                    LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted + 1);
-                    final Event event = schedulingStrategy.nextEvent();
-                    if (event instanceof LeaderToFollowerMessageEvent) {
-                        final int sendingSubnodeId = ((LeaderToFollowerMessageEvent) event).getSendingSubnodeId();
-                        // confirm this works / use partition / let
-                        deregisterSubnode(sendingSubnodeId);
-                        ((LeaderToFollowerMessageEvent) event).setExecuted();
-                        LOG.debug("----Do not let the previous learner handler message occur here! So pass this event---------\n\n\n");
-                        continue;
-                    }
-                    if (event.execute()) {
-                        ++totalExecuted;
-                        recordProperties(totalExecuted, begintime, event);
-                    }
+    private int scheduleFollowerProcessNEWLEADER(ExternalModelStrategy strategy,
+                                                 ModelVersion modelVersion,
+                                                 final int followerId,
+                                                 final int leaderId,
+                                                 final long modelZxid,
+                                                 int totalExecuted) throws SchedulerConfigurationException {
+        LOG.debug("Model version: {}.", modelVersion);
+        switch (modelVersion) {
+            case DEFAULT:
+            case zk_test_v3:
+                LOG.debug("Try to schedule FollowerProcessNEWLEADER. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerProcessNEWLEADER, followerId, leaderId, modelZxid, totalExecuted, 10);
+                break;
+            case zk_test_v4:
+            case zk_test_v5:
+                LOG.debug("Try to schedule FollowerProcessNEWLEADER and FollowerLogRequestWhenProcessingNEWLEADER. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerProcessNEWLEADER, followerId, leaderId, modelZxid, totalExecuted, 10);
+                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerLogRequestWhenProcessingNEWLEADER, followerId, -1, modelZxid, totalExecuted, 3);
+                break;
+            default:
+                throw new SchedulerConfigurationException();
+        }
+        return totalExecuted;
+
+    }
+
+    private int scheduleFollowerProcessNEWLEADERAfterCurrentEpochUpdated(ExternalModelStrategy strategy,
+                                                                         ModelVersion modelVersion,
+                                                                         final int followerId,
+                                                                         final int leaderId,
+                                                                         final long modelZxid,
+                                                                         int totalExecuted) throws SchedulerConfigurationException {
+        LOG.debug("Model version: {}.", modelVersion);
+        switch (modelVersion) {
+            case DEFAULT:
+            case zk_test_v3:
+                LOG.debug("Try to schedule FollowerLogRequestWhenProcessingNEWLEADER. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerLogRequestWhenProcessingNEWLEADER,
+                        followerId, leaderId, modelZxid, totalExecuted, 5);
+                // Log request in SYNC
+                List<Long> followerPendingProposals = pendingProposalsInSync.get(followerId);
+                Iterator<Long> pendingProposalIterator = followerPendingProposals.listIterator();
+                while (pendingProposalIterator.hasNext()) {
+                    LOG.debug("Try to schedule FollowerLog in SYNC. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
+                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerLog,
+                            followerId, leaderId, pendingProposalIterator.next(), totalExecuted, 3);
                 }
-                // pre-condition for election property check
-                waitAllNodesVoted();
-//                waitAllNodesSteadyBeforeRequest();
-            }
-            statistics.endTimer();
-            // check election results
-            leaderElectionVerifier.setModelResult(leaderId);
-            leaderElectionVerifier.verify();
-            // report statistics
-            if (currentStep != null && line != null) {
-                statistics.reportCurrentStep("[LINE " + currentStep + "]-" + line);
-            }
-            statistics.reportTotalExecutedEvents(totalExecuted);
-            statisticsWriter.write(statistics.toString() + "\n\n");
-            LOG.info(statistics.toString() + "\n\n\n\n\n");
-        } catch (IOException e) {
-            e.printStackTrace();
+                followerPendingProposals.clear();
+                totalExecuted++;
+                break;
+            case zk_test_v5:
+                LOG.debug("Do not need to schedule any event!" +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                totalExecuted = scheduleDummyEvent(totalExecuted);
+                break;
+            case zk_test_v4:
+            default:
+                throw new SchedulerConfigurationException();
         }
         return totalExecuted;
     }
 
-    /***
-     * The schedule process after the first round of election
-     * @param totalExecuted the number of previous executed events
-     * @return the number of executed events
-     */
-    private int scheduleAfterElection(int totalExecuted) {
-        try {
-            synchronized (controlMonitor) {
-                waitAllNodesSteady();
-                LOG.debug("All Nodes steady");
-                while (schedulingStrategy.hasNextEvent() && totalExecuted < 100) {
-                    long begintime = System.currentTimeMillis();
-                    for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); ++nodeId) {
-                        LOG.debug("--------------->Node Id: {}, NodeState: {}, " +
-                                        "role: {}, " +
-                                        "vote: {}",nodeId, nodeStates.get(nodeId),
-                                leaderElectionStates.get(nodeId),
-                                votes.get(nodeId)
-                        );
-                    }
-                    executionWriter.write("\n\n---Step: " + totalExecuted + "--->");
-                    LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
-                    final Event event = schedulingStrategy.nextEvent();
-                    // Only the leader will be crashed
-                    if (event instanceof NodeCrashEvent){
-                        LeaderElectionState RoleOfCrashNode = leaderElectionStates.get(((NodeCrashEvent) event).getNodeId());
-                        LOG.debug("----role: {}---------", RoleOfCrashNode);
-                        if ( RoleOfCrashNode != LeaderElectionState.LEADING){
-                            ((NodeCrashEvent) event).setExecuted();
-                            LOG.debug("----pass this event---------\n\n\n");
-                            continue;
-                        }
-                        if (event.execute()) {
-                            ++totalExecuted;
-
-                            // wait for new message from online nodes after the leader crashed
-                            waitNewMessageOffered();
-
-                            long endtime=System.currentTimeMillis();
-                            long costTime = (endtime - begintime);
-                            executionWriter.write("-------waitNewMessageOffered cost_time: " + costTime + "\n");
-                        }
-                    }
-                    else if (event.execute()) {
-                        ++totalExecuted;
-                        long endtime=System.currentTimeMillis();
-                        long costTime = (endtime - begintime);
-                        executionWriter.write("------cost_time: " + costTime + "\n");
-                    }
-                }
-                waitAllNodesVoted();
+    private int scheduleLeaderProcessACKLD(ExternalModelStrategy strategy,
+                                           ModelAction modelAction,
+                                           final int leaderId,
+                                           final int followerId,
+                                           final long modelZxid,
+                                           int totalExecuted) throws SchedulerConfigurationException {
+        //  release LearnerHandlerReadRecord
+        LOG.debug("readRecordIntercepted: {}", readRecordIntercepted);
+        if (readRecordIntercepted.containsKey(followerId) && readRecordIntercepted.get(followerId)) {
+            try {
+                LOG.debug("try to schedule LearnerHandlerReadRecord from follower: {}", followerId);
+                scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LearnerHandlerReadRecord,
+                        followerId, leaderId, modelZxid, totalExecuted, 3);
+            } catch (SchedulerConfigurationException e2) {
+                LOG.debug("SchedulerConfigurationException found when scheduling LearnerHandlerReadRecord! ");
+                throw new SchedulerConfigurationException();
             }
-
-        } catch (IOException e) {
-            e.printStackTrace();
         }
-        return totalExecuted;
+
+        //  release follower's ACK
+        try {
+            LOG.debug("try to schedule {},  follower: {}, leader: {}", modelAction, followerId, leaderId);
+            scheduleInternalEventWithWaitingRetry(strategy, modelAction,
+                    leaderId, followerId, modelZxid, totalExecuted, 3);
+        } catch (SchedulerConfigurationException e2) {
+            LOG.debug("SchedulerConfigurationException found when scheduling {}! ", modelAction);
+            throw new SchedulerConfigurationException();
+        }
+        return totalExecuted + 1;
     }
 
-    /***
-     * The schedule process after the first round of election with client requests
-     * @param totalExecuted the number of previous executed events
-     * @return the number of executed events
-     */
-    private int scheduleClientRequests(int totalExecuted) {
-        try {
-            synchronized (controlMonitor) {
-                waitAllNodesSteadyBeforeRequest();
-                LOG.debug("All Nodes steady for client requests");
-                for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
-                    executionWriter.write(lastProcessedZxids.get(nodeId).toString() + " # ");
+    private int scheduleFollowerProcessUPTODATE(ExternalModelStrategy strategy,
+                                                ModelVersion modelVersion,
+                                                final int followerId,
+                                                final int leaderId,
+                                                final long modelZxid,
+                                                int totalExecuted) throws SchedulerConfigurationException {
+        LOG.debug("Model version: {}.", modelVersion);
+        switch (modelVersion) {
+            case DEFAULT:
+            case zk_test_v3:
+                LOG.debug("Try to schedule FollowerProcessUPTODATE. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerProcessUPTODATE, followerId, leaderId, modelZxid, totalExecuted, 5);
+
+                LOG.debug("Try to schedule LeaderProcessACK. " +
+                        "leaderId: {}, followerId: {}", leaderId, followerId);
+                scheduleLeaderProcessACK(strategy, leaderId, followerId, modelZxid, totalExecuted);
+
+                // Log request in SYNC
+                List<Long> followerPendingProposals = pendingProposalsInSync.get(followerId);
+                Iterator<Long> pendingProposalIterator = followerPendingProposals.listIterator();
+                while (pendingProposalIterator.hasNext()) {
+                    LOG.debug("Try to schedule FollowerLog in SYNC. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
+                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerLog,
+                            followerId, leaderId, pendingProposalIterator.next(), totalExecuted, 3);
                 }
-                for (int i = 1; i <= schedulerConfiguration.getNumClientRequests() ; i++) {
-                    long begintime = System.currentTimeMillis();
-                    executionWriter.write("\n\n---Step: " + totalExecuted + "--->\n");
-                    LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
-                    LOG.debug("Client request: {}", i);
-                    final Event event = schedulingStrategy.nextEvent();
-                    LOG.debug("prepare to execute event: {}", event.toString());
-                    if (event.execute()) {
-                        ++totalExecuted;
-                        LOG.debug("executed event: {}", event.toString());
-                        long endtime=System.currentTimeMillis();
-                        long costTime = (endtime - begintime);
-                        executionWriter.write("-----cost_time: " + costTime + "\n");
-                        // Property verification
-                        for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
-                            executionWriter.write(lastProcessedZxids.get(nodeId).toString() + " # ");
-                        }
-                    }
+                followerPendingProposals.clear();
+                // Commit in SYNC
+                List<Long> followerPendingCommits = pendingCommitsInSync.get(followerId);
+                Iterator<Long> pendingCommitIterator = followerPendingCommits.listIterator();
+                while (pendingCommitIterator.hasNext()) {
+                    LOG.debug("Try to schedule FollowerCommit in SYNC. " +
+                            "followerId: {}, leaderId: {}", followerId, leaderId);
+                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerCommit,
+                            followerId, leaderId, pendingCommitIterator.next(), totalExecuted, 3);
                 }
-//                executionWriter.write("---Step: " + totalExecuted + "--->");
-//                LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
-//                LOG.debug("Client request: set data");
-//                final Event event = schedulingStrategy.nextEvent();
-//                LOG.debug("prepare to execute event: {}", event.toString());
-//                if (event.execute()) {
-//                    ++totalExecuted;
-//                    LOG.debug("executed event: {}", event.toString());
-//                }
+                followerPendingCommits.clear();
+                totalExecuted++;
+                break;
+            case zk_test_v4:
+            case zk_test_v5:
+                LOG.debug("Try to schedule FollowerProcessUPTODATE. " +
+                        "followerId: {}, leaderId: {}", followerId, leaderId);
+                scheduleInternalEventWithWaitingRetry(strategy,
+                        ModelAction.FollowerProcessUPTODATE, followerId, leaderId, modelZxid, totalExecuted, 5);
 
-//                nodeStartExecutor = new NodeStartExecutor(this, executionWriter, 1);
-//                nodeCrashExecutor = new NodeCrashExecutor(this, executionWriter, 1);
-//                final NodeCrashEvent nodeCrashEvent0 = new NodeCrashEvent(generateEventId(), 0, nodeCrashExecutor);
-//                schedulingStrategy.add(nodeCrashEvent0);
-//                final NodeCrashEvent nodeCrashEvent1 = new NodeCrashEvent(generateEventId(), 1, nodeCrashExecutor);
-//                schedulingStrategy.add(nodeCrashEvent1);
-//
-//                executionWriter.write("---Step: " + totalExecuted + "--->");
-//                LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
-//                LOG.debug("prepare to execute event: {}", nodeCrashEvent0.toString());
-//                if (nodeCrashEvent0.execute()) {
-//                    ++totalExecuted;
-//                    LOG.debug("executed event: {}", nodeCrashEvent0.toString());
-//                }
-//
-//                executionWriter.write("---Step: " + totalExecuted + "--->");
-//                LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
-//                LOG.debug("prepare to execute event: {}", nodeCrashEvent1.toString());
-//                if (nodeCrashEvent1.execute()) {
-//                    ++totalExecuted;
-//                    LOG.debug("executed event: {}", nodeCrashEvent1.toString());
-//                }
-
-                waitAllNodesVoted();
-            }
-
-        } catch (IOException e) {
-            e.printStackTrace();
+                LOG.debug("Try to schedule LeaderProcessACKofUPTODATE. " +
+                        "leaderId: {}, followerId: {}", leaderId, followerId);
+                scheduleLeaderProcessACK(strategy, leaderId, followerId, modelZxid, totalExecuted);
+                totalExecuted++;
+                break;
+            default:
+                throw new SchedulerConfigurationException();
         }
         return totalExecuted;
     }
@@ -2247,190 +2301,6 @@ public class TestingService implements TestingRemoteService {
         return totalExecuted;
     }
 
-    private int scheduleLeaderSyncFollower(ExternalModelStrategy strategy,
-                                           final int leaderId,
-                                           final int followerId,
-                                           final long modelEpoch,
-                                           int totalExecuted) throws SchedulerConfigurationException {
-        // step 1. release leader's SyncFollower
-        try {
-            LOG.debug("try to schedule LeaderSyncFollower. follower: {}", followerId);
-            totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderSyncFollower,
-                    leaderId, followerId, modelEpoch, totalExecuted, 1);
-        } catch (SchedulerConfigurationException e2) {
-            LOG.debug("SchedulerConfigurationException found when scheduling FollowerSendACKEPOCH! " +
-                    "Try to schedule FollowerSendACKEPOCH. (This should usually occur in Discovery)");
-            throw new SchedulerConfigurationException();
-        }
-//        // Step 2. release leader's waitForEpochACK
-//        try {
-//            LOG.debug("try to schedule LeaderWaitForEpochAck leader: {}", leaderId);
-//            totalExecuted = scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LeaderWaitForEpochAck,
-//                    leaderId, -1, modelEpoch, totalExecuted, 1);
-//        } catch (SchedulerConfigurationException e2) {
-//            LOG.debug("SchedulerConfigurationException found when scheduling LeaderWaitForEpochAck! " +
-//                    "Try to schedule LeaderWaitForEpochAck. (This should usually occur in Discovery)");
-//        }
-        return totalExecuted;
-    }
-
-    private int scheduleFollowerProcessNEWLEADER(ExternalModelStrategy strategy,
-                                                  ModelVersion modelVersion,
-                                                  final int followerId,
-                                                  final int leaderId,
-                                                  final long modelZxid,
-                                                  int totalExecuted) throws SchedulerConfigurationException {
-        LOG.debug("Model version: {}.", modelVersion);
-        switch (modelVersion) {
-            case DEFAULT:
-            case zk_test_v3:
-                LOG.debug("Try to schedule FollowerProcessNEWLEADER. " +
-                        "followerId: {}, leaderId: {}", followerId, leaderId);
-                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
-                        ModelAction.FollowerProcessNEWLEADER, followerId, leaderId, modelZxid, totalExecuted, 10);
-                break;
-            case zk_test_v4:
-            case zk_test_v5:
-                LOG.debug("Try to schedule FollowerProcessNEWLEADER and FollowerLogRequestWhenProcessingNEWLEADER. " +
-                        "followerId: {}, leaderId: {}", followerId, leaderId);
-                scheduleInternalEventWithWaitingRetry(strategy,
-                        ModelAction.FollowerProcessNEWLEADER, followerId, leaderId, modelZxid, totalExecuted, 10);
-                totalExecuted = scheduleInternalEventWithWaitingRetry(strategy,
-                        ModelAction.FollowerLogRequestWhenProcessingNEWLEADER, followerId, -1, modelZxid, totalExecuted, 3);
-                break;
-            default:
-                throw new SchedulerConfigurationException();
-        }
-        return totalExecuted;
-
-    }
-
-    private int scheduleFollowerProcessNEWLEADERAfterCurrentEpochUpdated(ExternalModelStrategy strategy,
-                                                                         ModelVersion modelVersion,
-                                                                         final int followerId,
-                                                                         final int leaderId,
-                                                                         final long modelZxid,
-                                                                         int totalExecuted) throws SchedulerConfigurationException {
-        LOG.debug("Model version: {}.", modelVersion);
-        switch (modelVersion) {
-            case DEFAULT:
-            case zk_test_v3:
-                LOG.debug("Try to schedule FollowerLogRequestWhenProcessingNEWLEADER. " +
-                        "followerId: {}, leaderId: {}", followerId, leaderId);
-                scheduleInternalEventWithWaitingRetry(strategy,
-                        ModelAction.FollowerLogRequestWhenProcessingNEWLEADER,
-                        followerId, leaderId, modelZxid, totalExecuted, 5);
-                // Log request in SYNC
-                List<Long> followerPendingProposals = pendingProposalsInSync.get(followerId);
-                Iterator<Long> pendingProposalIterator = followerPendingProposals.listIterator();
-                while (pendingProposalIterator.hasNext()) {
-                    LOG.debug("Try to schedule FollowerLog in SYNC. " +
-                            "followerId: {}, leaderId: {}", followerId, leaderId);
-                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerLog,
-                            followerId, leaderId, pendingProposalIterator.next(), totalExecuted, 3);
-                }
-                followerPendingProposals.clear();
-                totalExecuted++;
-                break;
-            case zk_test_v5:
-                LOG.debug("Do not need to schedule any event!" +
-                        "followerId: {}, leaderId: {}", followerId, leaderId);
-                totalExecuted = scheduleDummyEvent(totalExecuted);
-                break;
-            case zk_test_v4:
-            default:
-                throw new SchedulerConfigurationException();
-        }
-        return totalExecuted;
-    }
-
-    private int scheduleFollowerProcessUPTODATE(ExternalModelStrategy strategy,
-                                                ModelVersion modelVersion,
-                                                final int followerId,
-                                                final int leaderId,
-                                                final long modelZxid,
-                                                int totalExecuted) throws SchedulerConfigurationException {
-        LOG.debug("Model version: {}.", modelVersion);
-        switch (modelVersion) {
-            case DEFAULT:
-            case zk_test_v3:
-                LOG.debug("Try to schedule FollowerProcessUPTODATE. " +
-                        "followerId: {}, leaderId: {}", followerId, leaderId);
-                scheduleInternalEventWithWaitingRetry(strategy,
-                        ModelAction.FollowerProcessUPTODATE, followerId, leaderId, modelZxid, totalExecuted, 5);
-
-                LOG.debug("Try to schedule LeaderProcessACK. " +
-                        "leaderId: {}, followerId: {}", leaderId, followerId);
-                scheduleLeaderProcessACK(strategy, leaderId, followerId, modelZxid, totalExecuted);
-
-                // Log request in SYNC
-                List<Long> followerPendingProposals = pendingProposalsInSync.get(followerId);
-                Iterator<Long> pendingProposalIterator = followerPendingProposals.listIterator();
-                while (pendingProposalIterator.hasNext()) {
-                    LOG.debug("Try to schedule FollowerLog in SYNC. " +
-                            "followerId: {}, leaderId: {}", followerId, leaderId);
-                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerLog,
-                            followerId, leaderId, pendingProposalIterator.next(), totalExecuted, 3);
-                }
-                followerPendingProposals.clear();
-                // Commit in SYNC
-                List<Long> followerPendingCommits = pendingCommitsInSync.get(followerId);
-                Iterator<Long> pendingCommitIterator = followerPendingCommits.listIterator();
-                while (pendingCommitIterator.hasNext()) {
-                    LOG.debug("Try to schedule FollowerCommit in SYNC. " +
-                            "followerId: {}, leaderId: {}", followerId, leaderId);
-                    scheduleInternalEventWithWaitingRetry(strategy, ModelAction.FollowerCommit,
-                            followerId, leaderId, pendingCommitIterator.next(), totalExecuted, 3);
-                }
-                followerPendingCommits.clear();
-                totalExecuted++;
-                break;
-            case zk_test_v5:
-                LOG.debug("Do not need to schedule any event!" +
-                        "followerId: {}, leaderId: {}", followerId, leaderId);
-                totalExecuted = scheduleDummyEvent(totalExecuted);
-                break;
-            case zk_test_v4:
-            default:
-                throw new SchedulerConfigurationException();
-        }
-        return totalExecuted;
-    }
-
-
-
-    private int scheduleFollowerACKandLeaderReadRecord(ExternalModelStrategy strategy,
-                                                       ModelAction modelAction,
-                                                       final int leaderId,
-                                                       final int followerId,
-                                                       final long modelZxid,
-                                                       int totalExecuted) throws SchedulerConfigurationException {
-        //  release LearnerHandlerReadRecord
-        LOG.debug("readRecordIntercepted: {}", readRecordIntercepted);
-        if (readRecordIntercepted.containsKey(followerId) && readRecordIntercepted.get(followerId)) {
-            try {
-                LOG.debug("try to schedule LearnerHandlerReadRecord from follower: {}", followerId);
-                scheduleInternalEventWithWaitingRetry(strategy, ModelAction.LearnerHandlerReadRecord,
-                        followerId, leaderId, modelZxid, totalExecuted, 3);
-            } catch (SchedulerConfigurationException e2) {
-                LOG.debug("SchedulerConfigurationException found when scheduling LearnerHandlerReadRecord! ");
-                throw new SchedulerConfigurationException();
-            }
-        }
-
-        //  release follower's ACK
-        try {
-            LOG.debug("try to schedule {},  follower: {}, leader: {}", modelAction, followerId, leaderId);
-            scheduleInternalEventWithWaitingRetry(strategy, modelAction,
-                    leaderId, followerId, modelZxid, totalExecuted, 3);
-        } catch (SchedulerConfigurationException e2) {
-            LOG.debug("SchedulerConfigurationException found when scheduling {}! ", modelAction);
-            throw new SchedulerConfigurationException();
-        }
-        return totalExecuted + 1;
-    }
-
-
     /***
      * setData with specific data
      * if without specific data, will use eventId as its written string value
@@ -2580,6 +2450,139 @@ public class TestingService implements TestingRemoteService {
                 ++totalExecuted;
                 recordProperties(totalExecuted, startTime, event);
             }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return totalExecuted;
+    }
+
+    /***
+     * The schedule process after the first round of election
+     * @param totalExecuted the number of previous executed events
+     * @return the number of executed events
+     */
+    private int scheduleAfterElection(int totalExecuted) {
+        try {
+            synchronized (controlMonitor) {
+                waitAllNodesSteady();
+                LOG.debug("All Nodes steady");
+                while (schedulingStrategy.hasNextEvent() && totalExecuted < 100) {
+                    long begintime = System.currentTimeMillis();
+                    for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); ++nodeId) {
+                        LOG.debug("--------------->Node Id: {}, NodeState: {}, " +
+                                        "role: {}, " +
+                                        "vote: {}",nodeId, nodeStates.get(nodeId),
+                                leaderElectionStates.get(nodeId),
+                                votes.get(nodeId)
+                        );
+                    }
+                    executionWriter.write("\n\n---Step: " + totalExecuted + "--->");
+                    LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
+                    final Event event = schedulingStrategy.nextEvent();
+                    // Only the leader will be crashed
+                    if (event instanceof NodeCrashEvent){
+                        LeaderElectionState RoleOfCrashNode = leaderElectionStates.get(((NodeCrashEvent) event).getNodeId());
+                        LOG.debug("----role: {}---------", RoleOfCrashNode);
+                        if ( RoleOfCrashNode != LeaderElectionState.LEADING){
+                            ((NodeCrashEvent) event).setExecuted();
+                            LOG.debug("----pass this event---------\n\n\n");
+                            continue;
+                        }
+                        if (event.execute()) {
+                            ++totalExecuted;
+
+                            // wait for new message from online nodes after the leader crashed
+                            waitNewMessageOffered();
+
+                            long endtime=System.currentTimeMillis();
+                            long costTime = (endtime - begintime);
+                            executionWriter.write("-------waitNewMessageOffered cost_time: " + costTime + "\n");
+                        }
+                    }
+                    else if (event.execute()) {
+                        ++totalExecuted;
+                        long endtime=System.currentTimeMillis();
+                        long costTime = (endtime - begintime);
+                        executionWriter.write("------cost_time: " + costTime + "\n");
+                    }
+                }
+                waitAllNodesVoted();
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return totalExecuted;
+    }
+
+    /***
+     * The schedule process after the first round of election with client requests
+     * @param totalExecuted the number of previous executed events
+     * @return the number of executed events
+     */
+    private int scheduleClientRequests(int totalExecuted) {
+        try {
+            synchronized (controlMonitor) {
+                waitAllNodesSteadyBeforeRequest();
+                LOG.debug("All Nodes steady for client requests");
+                for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
+                    executionWriter.write(lastProcessedZxids.get(nodeId).toString() + " # ");
+                }
+                for (int i = 1; i <= schedulerConfiguration.getNumClientRequests() ; i++) {
+                    long begintime = System.currentTimeMillis();
+                    executionWriter.write("\n\n---Step: " + totalExecuted + "--->\n");
+                    LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
+                    LOG.debug("Client request: {}", i);
+                    final Event event = schedulingStrategy.nextEvent();
+                    LOG.debug("prepare to execute event: {}", event.toString());
+                    if (event.execute()) {
+                        ++totalExecuted;
+                        LOG.debug("executed event: {}", event.toString());
+                        long endtime=System.currentTimeMillis();
+                        long costTime = (endtime - begintime);
+                        executionWriter.write("-----cost_time: " + costTime + "\n");
+                        // Property verification
+                        for (int nodeId = 0; nodeId < schedulerConfiguration.getNumNodes(); nodeId++) {
+                            executionWriter.write(lastProcessedZxids.get(nodeId).toString() + " # ");
+                        }
+                    }
+                }
+//                executionWriter.write("---Step: " + totalExecuted + "--->");
+//                LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
+//                LOG.debug("Client request: set data");
+//                final Event event = schedulingStrategy.nextEvent();
+//                LOG.debug("prepare to execute event: {}", event.toString());
+//                if (event.execute()) {
+//                    ++totalExecuted;
+//                    LOG.debug("executed event: {}", event.toString());
+//                }
+
+//                nodeStartExecutor = new NodeStartExecutor(this, executionWriter, 1);
+//                nodeCrashExecutor = new NodeCrashExecutor(this, executionWriter, 1);
+//                final NodeCrashEvent nodeCrashEvent0 = new NodeCrashEvent(generateEventId(), 0, nodeCrashExecutor);
+//                schedulingStrategy.add(nodeCrashEvent0);
+//                final NodeCrashEvent nodeCrashEvent1 = new NodeCrashEvent(generateEventId(), 1, nodeCrashExecutor);
+//                schedulingStrategy.add(nodeCrashEvent1);
+//
+//                executionWriter.write("---Step: " + totalExecuted + "--->");
+//                LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
+//                LOG.debug("prepare to execute event: {}", nodeCrashEvent0.toString());
+//                if (nodeCrashEvent0.execute()) {
+//                    ++totalExecuted;
+//                    LOG.debug("executed event: {}", nodeCrashEvent0.toString());
+//                }
+//
+//                executionWriter.write("---Step: " + totalExecuted + "--->");
+//                LOG.debug("\n\n\n\n\n---------------------------Step: {}--------------------------", totalExecuted);
+//                LOG.debug("prepare to execute event: {}", nodeCrashEvent1.toString());
+//                if (nodeCrashEvent1.execute()) {
+//                    ++totalExecuted;
+//                    LOG.debug("executed event: {}", nodeCrashEvent1.toString());
+//                }
+
+                waitAllNodesVoted();
+            }
+
         } catch (IOException e) {
             e.printStackTrace();
         }
