@@ -446,15 +446,16 @@ public class TestingService implements TestingRemoteService {
             final int serverNum = trace.getServerNum();
             Map<String, Integer> serverIdMap = new HashMap<>();
             // By default, node mapping in reverse order like:
-            // s0 : id = 2
+            // s0 : id = 0
             // s1 : id = 1
-            // s2 : id = 0
-            int serverId = serverNum;
+            // s2 : id = 2
+            int serverId = 0;
             for (String serverStr : trace.getServerIds()) {
-                serverIdMap.put(serverStr, --serverId);
+                serverIdMap.put(serverStr, serverId);
+                serverId++;
             }
             LOG.debug(">> server num: {}, server mapping: {}", serverNum, serverIdMap);
-            assert serverId == 0;
+            assert serverId == serverNum;
 
             // create trace directory, including each server's working directory.
             ensemble.configureEnsemble(traceName, serverNum);
@@ -1666,6 +1667,12 @@ public class TestingService implements TestingRemoteService {
                 // throw SchedulerConfigurationException if leader does not exist
                 if (!electionFinished) {
                     LOG.debug("Leader not exist! " +
+                            "SchedulerConfigurationException found when scheduling ElectionAndDiscovery." +
+                            " leader: " + leaderId + " peers: " + peers);
+                    throw new SchedulerConfigurationException();
+                }
+                if (!LeaderElectionState.LEADING.equals(leaderElectionStates.get(leaderId))) {
+                    LOG.debug("Unexpected leader is elected! " +
                             "SchedulerConfigurationException found when scheduling ElectionAndDiscovery." +
                             " leader: " + leaderId + " peers: " + peers);
                     throw new SchedulerConfigurationException();
@@ -4193,10 +4200,11 @@ public class TestingService implements TestingRemoteService {
             LOG.debug("Try to set flag NODE_PAIR_IN_PARTITION to all participants' events before the node get into LOOKING...");
 //            recordCrashRelatedEventPartitioned(participants, true);
             for (int peer: participants) {
+                LOG.debug("\n\n\n\n\nTry to set flag NODE_PAIR_IN_PARTITION to events between {} and {}...", nodeId, peer);
                 recordPartitionedEvent(new HashSet<Integer>() {{
                     add(nodeId);
                     add(peer);
-                }}, false);
+                }}, true);
             }
             // release all SYNC /COMMIT message
             LOG.debug("release Broadcast Events of server {} and wait for them in LOOKING state", participants);
